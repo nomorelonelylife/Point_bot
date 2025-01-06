@@ -67,8 +67,9 @@ class PointsBot(discord.Client):
         self.send_heartbeat.start()
 
     async def register_commands(self):
-        @self.tree.command(name="addtweet", description="Add tweet to monitor", guild_only=True, default_permissions=discord.Permissions(administrator=True))
+        @self.tree.command(name="addtweet", description="Add tweet to monitor")
         @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.guilds(interaction.guild_id)
         @app_commands.describe(
             url="Tweet URL",
             like_points="Points per like",
@@ -127,7 +128,7 @@ class PointsBot(discord.Client):
 
 
         @self.tree.command(name="points", description="Check your points")
-        @app_commands.guild_only()
+        @app_commands.guilds(interaction.guild_id)
         async def points(interaction: discord.Interaction):
             try:
                 points = self.db.get_points(str(interaction.user.id))
@@ -154,8 +155,9 @@ class PointsBot(discord.Client):
                         ephemeral=True
                     )
 
-        @self.tree.command(name="activeposts", description="View monitored posts", guild_only=True, default_permissions=discord.Permissions(administrator=True))
+        @self.tree.command(name="activeposts", description="View monitored posts")
         @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.guilds(interaction.guild_id)
         async def activeposts(interaction: discord.Interaction):
             try:
                 tweets = self.db.get_active_tweets()
