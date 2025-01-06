@@ -67,14 +67,14 @@ class PointsBot(discord.Client):
         self.send_heartbeat.start()
 
     async def register_commands(self):
-        @self.tree.command(name="addtweet", description="Add tweet to monitor")
+        @self.tree.command(name="addtweet", description="Add tweet to monitor", guild_only=True, default_permissions=discord.Permissions(administrator=True))
+        @app_commands.checks.has_permissions(administrator=True)
         @app_commands.describe(
             url="Tweet URL",
             like_points="Points per like",
             retweet_points="Points per retweet",
             reply_points="Points per reply"
         )
-        @app_commands.checks.has_permissions(administrator=True)
         async def addtweet(
             interaction: discord.Interaction,
             url: str,
@@ -84,25 +84,25 @@ class PointsBot(discord.Client):
         ):
             try:
                 if not interaction.guild:
-                    await interaction.response.send_message(
-                        "This command can only be used in a server", 
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("This command can only be used in a server", ephemeral=True)
+                    else:
+                        await interaction.followup.send("This command can only be used in a server", ephemeral=True)
                     return
 
                 tweet_id = self.validate_tweet_url(url)
                 if not tweet_id:
-                    await interaction.response.send_message(
-                        "Invalid tweet URL format", 
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("Invalid tweet URL format", ephemeral=True)
+                    else:
+                        await interaction.followup.send("Invalid tweet URL format", ephemeral=True)
                     return
 
                 if any(p < 0 for p in [like_points, retweet_points, reply_points]):
-                    await interaction.response.send_message(
-                        "Points values cannot be negative", 
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("Points values cannot be negative", ephemeral=True)
+                    else:
+                        await interaction.followup.send("Points values cannot be negative", ephemeral=True)
                     return
 
                 self.db.add_monitored_tweet(tweet_id, {
@@ -110,31 +110,50 @@ class PointsBot(discord.Client):
                     'retweet': retweet_points,
                     'reply': reply_points
                 })
-                await interaction.response.send_message("Tweet added!", ephemeral=True)
-                
+        
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Tweet added!", ephemeral=True)
+                else:
+                    await interaction.followup.send("Tweet added!", ephemeral=True)
+            
             except Exception as e:
                 self.error_logger.log_error(e, "addtweet command")
-                await interaction.response.send_message(
-                    "An error occurred while adding the tweet", 
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("An error occurred while adding the tweet", ephemeral=True)
+                else:
+                    await interaction.followup.send("An error occurred while adding the tweet", ephemeral=True)
 
-        @self.tree.command(name="points", description="Check your points")
+
+
+
+        @self.tree.command(name="points", description="Check your points", guild_only=True) 
         async def points(interaction: discord.Interaction):
             try:
                 points = self.db.get_points(str(interaction.user.id))
-                await interaction.response.send_message(
-                    f"You have {points} points",
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"You have {points} points",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"You have {points} points",
+                        ephemeral=True
+                    )
             except Exception as e:
                 self.error_logger.log_error(e, "points command")
-                await interaction.response.send_message(
-                    "An error occurred while fetching points",
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "An error occurred while fetching points",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "An error occurred while fetching points",
+                        ephemeral=True
+                    )
 
-        @self.tree.command(name="activeposts", description="View monitored posts")
+        @self.tree.command(name="activeposts", description="View monitored posts", guild_only=True, default_permissions=discord.Permissions(administrator=True))
         @app_commands.checks.has_permissions(administrator=True)
         async def activeposts(interaction: discord.Interaction):
             try:
@@ -143,16 +162,30 @@ class PointsBot(discord.Client):
                     f"https://twitter.com/x/status/{tweet['id']}"
                     for tweet in tweets
                 )
-                await interaction.response.send_message(
-                    content or "No active tweets",
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        content or "No active tweets",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        content or "No active tweets",
+                        ephemeral=True
+                    )
             except Exception as e:
                 self.error_logger.log_error(e, "activeposts command")
-                await interaction.response.send_message(
-                    "An error occurred while fetching active posts",
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "An error occurred while fetching active posts",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "An error occurred while fetching active posts",
+                        ephemeral=True
+                    )
+
+
 
         await self.tree.sync()
 
@@ -198,24 +231,30 @@ class PointsBot(discord.Client):
 
     @tasks.loop(hours=24)
     async def backup_database(self):
-        try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_dir = './backup'
-            backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
-            
-            os.makedirs(backup_dir, mode=0o700, exist_ok=True)
-            self.db.backup_database(backup_dir)
-            
-            # Cleanup old backups
-            cutoff = (datetime.now() - timedelta(days=7))
-            for f in os.listdir(backup_dir):
-                if f.startswith('points_') and f.endswith('.db'):
-                    file_path = os.path.join(backup_dir, f)
-                    if datetime.fromtimestamp(os.path.getctime(file_path)) < cutoff:
-                        os.remove(file_path)
-                        
-        except Exception as e:
-            self.error_logger.log_error(e, "database backup")
+       try:
+           timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+           backup_dir = './backup'
+           backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
+       
+           if os.path.exists(backup_dir):
+               stat = os.stat(backup_dir)
+               if stat.st_mode & 0o777 != 0o700:
+                   os.chmod(backup_dir, 0o700)
+           else:
+               os.makedirs(backup_dir, mode=0o700)
+           
+           self.db.backup_database(backup_path)
+           os.chmod(backup_path, 0o600)
+       
+           cutoff = (datetime.now() - timedelta(days=7))
+           for f in os.listdir(backup_dir):
+               if f.startswith('points_') and f.endswith('.db'):
+                   file_path = os.path.join(backup_dir, f)
+                   if datetime.fromtimestamp(os.path.getctime(file_path)) < cutoff:
+                       os.remove(file_path)
+                   
+       except Exception as e:
+           self.error_logger.log_error(e, "database backup")
 
     @tasks.loop(minutes=5)
     async def send_heartbeat(self):
