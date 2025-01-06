@@ -1,9 +1,11 @@
 import os
 import sys
 import logging
+import threading
 from typing import List
 from dotenv import load_dotenv
 from .bot import PointsBot
+from .web_server import start_server
 
 def setup_logging():
     logging.basicConfig(
@@ -20,7 +22,6 @@ def validate_env(required_envs: List[str]) -> None:
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    # Validate numeric values
     try:
         int(os.getenv('SOCIAL_CHANNEL_ID', '0'))
         int(os.getenv('OG_ROLE_ID', '0'))
@@ -40,6 +41,10 @@ def main():
         ]
         
         validate_env(required_envs)
+
+        # Start web server in a separate thread
+        server_thread = threading.Thread(target=start_server, daemon=True)
+        server_thread.start()
 
         bot = PointsBot(
             twitter_token=os.getenv('TWITTER_BEARER_TOKEN'),
