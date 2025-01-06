@@ -126,7 +126,8 @@ class PointsBot(discord.Client):
 
 
 
-        @self.tree.command(name="points", description="Check your points", guild_only=True) 
+        @self.tree.command(name="points", description="Check your points")
+        @app_commands.guild_only()
         async def points(interaction: discord.Interaction):
             try:
                 points = self.db.get_points(str(interaction.user.id))
