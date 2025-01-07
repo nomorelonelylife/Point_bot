@@ -80,16 +80,25 @@ class PointsBot(discord.Client):
         ):
             try:
                 if not interaction.guild:
-                    await interaction.response.send_message("This command can only be used in a server", ephemeral=True)
+                    await interaction.response.send_message(
+                        "This command can only be used in a server",
+                        ephemeral=True
+                    )
                     return
 
                 tweet_id = self.validate_tweet_url(url)
                 if not tweet_id:
-                    await interaction.response.send_message("Invalid tweet URL format", ephemeral=True)
+                    await interaction.response.send_message(
+                        "Invalid tweet URL format",
+                        ephemeral=True
+                    )
                     return
 
                 if any(p < 0 for p in [like_points, retweet_points, reply_points]):
-                    await interaction.response.send_message("Points values cannot be negative", ephemeral=True)
+                    await interaction.response.send_message(
+                        "Points values cannot be negative",
+                        ephemeral=True
+                    )
                     return
 
                 self.db.add_monitored_tweet(tweet_id, {
@@ -98,13 +107,17 @@ class PointsBot(discord.Client):
                     'reply': reply_points
                 })
 
-                await interaction.response.send_message("Tweet added!", ephemeral=True)
+                await interaction.response.send_message(
+                    "Tweet added!",
+                    ephemeral=True
+                )
 
             except Exception as e:
                 self.error_logger.log_error(e, "addtweet command")
-                await interaction.response.send_message("An error occurred while adding the tweet", ephemeral=True)
-
-
+                await interaction.response.send_message(
+                    "An error occurred while adding the tweet",
+                    ephemeral=True
+                )
 
         @self.tree.command(name="points", description="Check your points")
         async def points(interaction: discord.Interaction):
@@ -141,13 +154,41 @@ class PointsBot(discord.Client):
                     "An error occurred while fetching active posts",
                     ephemeral=True
                 )
-        
+
+        @self.tree.command(name="checktweets", description="Manually check tweets for points (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        async def checktweets(interaction: discord.Interaction):
+            try:
+                await interaction.response.defer(ephemeral=True)
+                
+                points_updates = await self._process_tweets()
+                
+                if points_updates:
+                    summary = "\n".join([
+                        f"Tweet {update['tweet_id']}: {update['points']} points awarded"
+                        for update in points_updates
+                    ])
+                    await interaction.followup.send(
+                        f"Manual check completed!\n{summary}",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Check completed. No points were awarded.",
+                        ephemeral=True
+                    )
+
+            except Exception as e:
+                self.error_logger.log_error(e, "checktweets command")
+                await interaction.followup.send(
+                    "An error occurred while checking tweets",
+                    ephemeral=True
+                )
 
         @self.tree.command(name="exportdb", description="Export current database (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
         async def exportdb(interaction: discord.Interaction):
             try:
-                # Check if interaction is in a guild and channel
                 if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
                     await interaction.response.send_message(
                         "This command can only be used in a server text channel",
@@ -155,7 +196,6 @@ class PointsBot(discord.Client):
                     )
                     return
 
-                # Check if the channel is private
                 if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
                     await interaction.response.send_message(
                         "For security reasons, this command can only be used in private channels",
@@ -163,26 +203,21 @@ class PointsBot(discord.Client):
                     )
                     return
 
-                # Defer the response as file operations might take time
                 await interaction.response.defer(ephemeral=True)
 
-                # Create a temporary copy of the database
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 temp_path = f'./temp_export_{timestamp}.db'
                 
                 try:
-                    # Create a safe copy of the database
-                    self.db.conn.execute('PRAGMA wal_checkpoint(FULL)')  # Ensure WAL is synced
+                    self.db.conn.execute('PRAGMA wal_checkpoint(FULL)')
                     shutil.copy2(self.db.db_path, temp_path)
                     
-                    # Send the file
                     await interaction.followup.send(
                         "Here's your database export:",
                         file=discord.File(temp_path, filename=f'points_{timestamp}.db'),
                         ephemeral=True
                     )
                 finally:
-                    # Clean up the temporary file
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
 
@@ -193,11 +228,14 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
 
-
         await self.tree.sync()
 
-    @tasks.loop(hours=24)
-    async def check_tweets(self):
+    async def _process_tweets(self) -> list:
+        """
+        Process tweets and update points
+        Returns a list of updates made
+        """
+        updates = []
         try:
             tweets = self.db.get_active_tweets()
             guild = self.guilds[0] if self.guilds else None
@@ -227,6 +265,11 @@ class PointsBot(discord.Client):
                         points
                     )
 
+                updates.append({
+                    "tweet_id": tweet['id'],
+                    "points": points
+                })
+
                 await channel.send(
                     f"🎉 Points Update:\n"
                     f"Tweet: https://twitter.com/x/status/{tweet['id']}\n"
@@ -234,35 +277,44 @@ class PointsBot(discord.Client):
                 )
                 
         except Exception as e:
+            self.error_logger.log_error(e, "_process_tweets")
+            raise e
+
+        return updates
+
+    @tasks.loop(hours=24)
+    async def check_tweets(self):
+        try:
+            await self._process_tweets()
+        except Exception as e:
             self.error_logger.log_error(e, "check_tweets task")
 
     @tasks.loop(hours=24)
     async def backup_database(self):
-       try:
-           timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-           backup_dir = './backup'
-           backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_dir = './backup'
+            backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
        
-           if os.path.exists(backup_dir):
-               stat = os.stat(backup_dir)
-               if stat.st_mode & 0o777 != 0o700:
-                   os.chmod(backup_dir, 0o700)
-           else:
-               os.makedirs(backup_dir, mode=0o700)
+            if os.path.exists(backup_dir):
+                stat = os.stat(backup_dir)
+                if stat.st_mode & 0o777 != 0o700:
+                    os.chmod(backup_dir, 0o700)
+            else:
+                os.makedirs(backup_dir, mode=0o700)
            
-           self.db.backup_database(backup_path)
-           os.chmod(backup_path, 0o600)
+            self.db.backup_database(backup_path)
+            os.chmod(backup_path, 0o600)
        
-           cutoff = (datetime.now() - timedelta(days=7))
-           for f in os.listdir(backup_dir):
-               if f.startswith('points_') and f.endswith('.db'):
-                   file_path = os.path.join(backup_dir, f)
-                   if datetime.fromtimestamp(os.path.getctime(file_path)) < cutoff:
-                       os.remove(file_path)
+            cutoff = (datetime.now() - timedelta(days=7))
+            for f in os.listdir(backup_dir):
+                if f.startswith('points_') and f.endswith('.db'):
+                    file_path = os.path.join(backup_dir, f)
+                    if datetime.fromtimestamp(os.path.getctime(file_path)) < cutoff:
+                        os.remove(file_path)
                    
-       except Exception as e:
-           self.error_logger.log_error(e, "database backup")
-
+        except Exception as e:
+            self.error_logger.log_error(e, "database backup")
 
     @check_tweets.before_loop
     @backup_database.before_loop
