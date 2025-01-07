@@ -84,25 +84,16 @@ class PointsBot(discord.Client):
         ):
             try:
                 if not interaction.guild:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message("This command can only be used in a server", ephemeral=True)
-                    else:
-                        await interaction.followup.send("This command can only be used in a server", ephemeral=True)
+                    await interaction.response.send_message("This command can only be used in a server", ephemeral=True)
                     return
 
                 tweet_id = self.validate_tweet_url(url)
                 if not tweet_id:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message("Invalid tweet URL format", ephemeral=True)
-                    else:
-                        await interaction.followup.send("Invalid tweet URL format", ephemeral=True)
+                    await interaction.response.send_message("Invalid tweet URL format", ephemeral=True)
                     return
 
                 if any(p < 0 for p in [like_points, retweet_points, reply_points]):
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message("Points values cannot be negative", ephemeral=True)
-                    else:
-                        await interaction.followup.send("Points values cannot be negative", ephemeral=True)
+                    await interaction.response.send_message("Points values cannot be negative", ephemeral=True)
                     return
 
                 self.db.add_monitored_tweet(tweet_id, {
@@ -110,19 +101,12 @@ class PointsBot(discord.Client):
                     'retweet': retweet_points,
                     'reply': reply_points
                 })
-        
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("Tweet added!", ephemeral=True)
-                else:
-                    await interaction.followup.send("Tweet added!", ephemeral=True)
-            
+
+                await interaction.response.send_message("Tweet added!", ephemeral=True)
+
             except Exception as e:
                 self.error_logger.log_error(e, "addtweet command")
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("An error occurred while adding the tweet", ephemeral=True)
-                else:
-                    await interaction.followup.send("An error occurred while adding the tweet", ephemeral=True)
-
+                await interaction.response.send_message("An error occurred while adding the tweet", ephemeral=True)
 
 
 
@@ -130,28 +114,16 @@ class PointsBot(discord.Client):
         async def points(interaction: discord.Interaction):
             try:
                 points = self.db.get_points(str(interaction.user.id))
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"You have {points} points",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.followup.send(
-                        f"You have {points} points",
-                        ephemeral=True
-                    )
+                await interaction.response.send_message(
+                    f"You have {points} points",
+                    ephemeral=True
+                )
             except Exception as e:
                 self.error_logger.log_error(e, "points command")
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "An error occurred while fetching points",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.followup.send(
-                        "An error occurred while fetching points",
-                        ephemeral=True
-                    )
+                await interaction.response.send_message(
+                    "An error occurred while fetching points",
+                    ephemeral=True
+                )
 
         @self.tree.command(name="activeposts", description="View monitored posts")
         @app_commands.checks.has_permissions(administrator=True)
@@ -162,28 +134,17 @@ class PointsBot(discord.Client):
                     f"https://twitter.com/x/status/{tweet['id']}"
                     for tweet in tweets
                 )
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        content or "No active tweets",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.followup.send(
-                        content or "No active tweets",
-                        ephemeral=True
-                    )
+                await interaction.response.send_message(
+                    content or "No active tweets",
+                    ephemeral=True
+                )
+
             except Exception as e:
                 self.error_logger.log_error(e, "activeposts command")
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "An error occurred while fetching active posts",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.followup.send(
-                        "An error occurred while fetching active posts",
-                        ephemeral=True
-                    )
+                await interaction.response.send_message(
+                    "An error occurred while fetching active posts",
+                    ephemeral=True
+                )
 
 
 
