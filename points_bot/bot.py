@@ -146,7 +146,57 @@ class PointsBot(discord.Client):
                     "An error occurred while fetching active posts",
                     ephemeral=True
                 )
+        
 
+        @self.tree.command(name="exportdb", description="Export current database (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        async def exportdb(interaction: discord.Interaction):
+            try:
+                # Check if interaction is in a guild and channel
+                if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
+                    await interaction.response.send_message(
+                        "This command can only be used in a server text channel",
+                        ephemeral=True
+                    )
+                    return
+
+                # Check if the channel is private
+                if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
+                    await interaction.response.send_message(
+                        "For security reasons, this command can only be used in private channels",
+                        ephemeral=True
+                    )
+                    return
+
+                # Defer the response as file operations might take time
+                await interaction.response.defer(ephemeral=True)
+
+                # Create a temporary copy of the database
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                temp_path = f'./temp_export_{timestamp}.db'
+                
+                try:
+                    # Create a safe copy of the database
+                    self.db.conn.execute('PRAGMA wal_checkpoint(FULL)')  # Ensure WAL is synced
+                    shutil.copy2(self.db.db_path, temp_path)
+                    
+                    # Send the file
+                    await interaction.followup.send(
+                        "Here's your database export:",
+                        file=discord.File(temp_path, filename=f'points_{timestamp}.db'),
+                        ephemeral=True
+                    )
+                finally:
+                    # Clean up the temporary file
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+
+            except Exception as e:
+                self.error_logger.log_error(e, "exportdb command")
+                await interaction.followup.send(
+                    "An error occurred while exporting the database",
+                    ephemeral=True
+                )
 
 
         await self.tree.sync()
