@@ -33,7 +33,6 @@ class PointsBot(discord.Client):
         twitter_token: str, 
         channel_id: str, 
         og_role_id: str,
-        heartbeat_url: Optional[str] = None,
         db_path: Optional[str] = None
     ):
         intents = discord.Intents.default()
@@ -45,8 +44,6 @@ class PointsBot(discord.Client):
         self.twitter = TwitterService(twitter_token)
         self.channel_id = int(channel_id)
         self.og_role_id = int(og_role_id)
-        self.heartbeat_url = heartbeat_url
-        self.heartbeat_session = None
         self.error_logger = ErrorLogger()
 
     def validate_tweet_url(self, url: str) -> Optional[str]:
@@ -61,11 +58,9 @@ class PointsBot(discord.Client):
         return None
 
     async def setup_hook(self):
-        self.heartbeat_session = aiohttp.ClientSession()
         await self.register_commands()
         self.check_tweets.start()
         self.backup_database.start()
-        self.send_heartbeat.start()
 
     async def register_commands(self):
         @self.tree.command(name="addtweet", description="Add tweet to monitor")
@@ -268,29 +263,13 @@ class PointsBot(discord.Client):
        except Exception as e:
            self.error_logger.log_error(e, "database backup")
 
-    @tasks.loop(minutes=random.uniform(1, 5))
-    async def send_heartbeat(self):
-        if not self.heartbeat_url:
-            return
-            
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with self.heartbeat_session.get(self.heartbeat_url, timeout=timeout) as resp:
-                if resp.status != 200:
-                    raise ValueError(f"Heartbeat failed with status {resp.status}")
-        except Exception as e:
-            self.error_logger.log_error(e, "heartbeat")
-            await asyncio.sleep(5)  # Backoff before next attempt
 
     @check_tweets.before_loop
     @backup_database.before_loop
-    @send_heartbeat.before_loop
     async def before_tasks(self):
         await self.wait_until_ready()
 
     async def close(self):
-        if self.heartbeat_session:
-            await self.heartbeat_session.close()
         if hasattr(self, 'db'):
             self.db.conn.close()
         await super().close()

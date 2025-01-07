@@ -5,7 +5,6 @@ import threading
 from typing import List
 from dotenv import load_dotenv
 from .bot import PointsBot
-from .web_server import start_server
 
 def setup_logging():
     logging.basicConfig(
@@ -42,15 +41,11 @@ def main():
         
         validate_env(required_envs)
 
-        # Start web server in a separate thread
-        server_thread = threading.Thread(target=start_server, daemon=True)
-        server_thread.start()
 
         bot = PointsBot(
             twitter_token=os.getenv('TWITTER_BEARER_TOKEN'),
             channel_id=os.getenv('SOCIAL_CHANNEL_ID'),
             og_role_id=os.getenv('OG_ROLE_ID'),
-            heartbeat_url=os.getenv('HEARTBEAT_URL'),
             db_path=os.getenv('DB_PATH')
         )
         
