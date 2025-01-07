@@ -8,12 +8,12 @@ from datetime import datetime
 
 class TwitterService:
     def __init__(self, bearer_token: str):
-        if not bearer_token.startswith('Bearer '):
-            bearer_token = f'Bearer {bearer_token}'
+        if bearer_token.startswith('Bearer '):
+            bearer_token = bearer_token[7:]
         
         self.client = tweepy.Client(
-            bearer_token=bearer_token,
-            wait_on_rate_limit=True  # 
+            bearer_token=bearer_token,  
+            wait_on_rate_limit=True
         )
         self.last_request_time = 0
         self.min_request_interval = 902.0
