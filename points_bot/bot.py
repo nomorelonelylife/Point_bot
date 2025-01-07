@@ -217,7 +217,7 @@ class PointsBot(discord.Client):
        except Exception as e:
            self.error_logger.log_error(e, "database backup")
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def send_heartbeat(self):
         if not self.heartbeat_url:
             return
