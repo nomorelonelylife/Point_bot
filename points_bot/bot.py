@@ -4,6 +4,7 @@ from discord.ext import tasks
 from typing import Optional
 import re
 import logging
+import random
 from collections import deque
 import asyncio
 import os
@@ -217,7 +218,7 @@ class PointsBot(discord.Client):
        except Exception as e:
            self.error_logger.log_error(e, "database backup")
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(minutes=random.uniform(1, 5))
     async def send_heartbeat(self):
         if not self.heartbeat_url:
             return
