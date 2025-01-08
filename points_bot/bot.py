@@ -101,7 +101,7 @@ class PointsBot(discord.Client):
                     )
                     return
 
-                self.db.add_monitored_tweet(tweet_id, {
+                await self.db.add_monitored_tweet(tweet_id, {
                     'like': like_points,
                     'retweet': retweet_points,
                     'reply': reply_points
@@ -142,7 +142,7 @@ class PointsBot(discord.Client):
                     tweet_id = extracted_id
         
                 # Remove from database
-                if self.db.remove_monitored_tweet(tweet_id):
+                if await self.db.remove_monitored_tweet(tweet_id):
                     await interaction.response.send_message(
                         f"Tweet {tweet_id} has been removed from monitoring",
                         ephemeral=True
@@ -162,13 +162,10 @@ class PointsBot(discord.Client):
 
 
 
-
-
-
         @self.tree.command(name="points", description="Check your points")
         async def points(interaction: discord.Interaction):
             try:
-                points = self.db.get_points(str(interaction.user.id))
+                points = await self.db.get_points(str(interaction.user.id))
                 await interaction.response.send_message(
                     f"You have {points} points",
                     ephemeral=True
@@ -178,13 +175,14 @@ class PointsBot(discord.Client):
                 await interaction.response.send_message(
                     "An error occurred while fetching points",
                     ephemeral=True
-                )
+               )
+
 
         @self.tree.command(name="activeposts", description="View monitored posts")
         @app_commands.checks.has_permissions(administrator=True)
         async def activeposts(interaction: discord.Interaction):
             try:
-                tweets = self.db.get_active_tweets()
+                tweets = await self.db.get_active_tweets()
                 content = '\n'.join(
                     f"https://twitter.com/x/status/{tweet['id']}"
                     for tweet in tweets
@@ -255,9 +253,10 @@ class PointsBot(discord.Client):
                 temp_path = f'./temp_export_{timestamp}.db'
                 
                 try:
-                    self.db.conn.execute('PRAGMA wal_checkpoint(FULL)')
-                    shutil.copy2(self.db.db_path, temp_path)
-                    
+             
+                    await asyncio.to_thread(lambda: self.db.conn.execute('PRAGMA wal_checkpoint(FULL)'))
+                    await asyncio.to_thread(lambda: shutil.copy2(self.db.db_path, temp_path))
+            
                     await interaction.followup.send(
                         "Here's your database export:",
                         file=discord.File(temp_path, filename=f'points_{timestamp}.db'),
@@ -283,7 +282,7 @@ class PointsBot(discord.Client):
         """
         updates = []
         try:
-            tweets = self.db.get_active_tweets()
+            tweets = await self.db.get_active_tweets()
             guild = self.guilds[0] if self.guilds else None
             channel = self.get_channel(self.channel_id)
             
@@ -305,7 +304,7 @@ class PointsBot(discord.Client):
 
                 og_members = [m for m in guild.members if og_role in m.roles]
                 for member in og_members:
-                    self.db.update_points(
+                    await self.db.update_points(
                         str(member.id),
                         member.name,
                         points
@@ -349,7 +348,7 @@ class PointsBot(discord.Client):
             else:
                 os.makedirs(backup_dir, mode=0o700)
            
-            self.db.backup_database(backup_path)
+            await self.db.backup_database(backup_path)
             os.chmod(backup_path, 0o600)
        
             cutoff = (datetime.now() - timedelta(days=7))
@@ -369,7 +368,7 @@ class PointsBot(discord.Client):
 
     async def close(self):
         if hasattr(self, 'db'):
-            self.db.conn.close()
+            self.db.__exit__(None, None, None)
         await super().close()
 
     async def on_ready(self):
