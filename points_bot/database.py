@@ -1,156 +1,174 @@
-import sqlite3
-import os
+# points_bot/database.py
+import redis
+import json
 from typing import List, Dict, Optional
 from datetime import datetime
 import logging
+import os
 
 class DatabaseService:
-    def __init__(self, db_path: str = "./points.db"):
-        self.db_path = db_path
-        self.conn = sqlite3.connect(
-            db_path,
-            timeout=30.0,
-            isolation_level='EXCLUSIVE'
+    def __init__(self, redis_url: str = "redis://localhost:6379/0"):
+        self.redis = redis.from_url(
+            redis_url,
+            decode_responses=True
         )
-        self.conn.execute('PRAGMA journal_mode=WAL')
-        self.conn.row_factory = sqlite3.Row
-        self.initialize()
-
-    def initialize(self):
-        self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS user_points (
-                user_id TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                points INTEGER DEFAULT 0,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS monitored_tweets (
-                tweet_id TEXT PRIMARY KEY,
-                is_active BOOLEAN DEFAULT TRUE,
-                like_points FLOAT DEFAULT 1,
-                retweet_points FLOAT DEFAULT 2,
-                reply_points FLOAT DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        self.conn.commit()
+        self.KEY_PREFIX = {
+            'user_points': 'user:points:',
+            'user_info': 'user:info:',
+            'active_tweets': 'tweets:active',
+            'tweet_info': 'tweet:info:',
+        }
 
     def add_monitored_tweet(self, tweet_id: str, points: Dict[str, float]) -> None:
         try:
-            cursor = self.conn.cursor()
+            active_tweets = self.redis.smembers(self.KEY_PREFIX['active_tweets'])
             
-            # Check active tweets count
-            active_count = cursor.execute(
-                "SELECT COUNT(*) FROM monitored_tweets WHERE is_active = TRUE"
-            ).fetchone()[0]
+            if len(active_tweets) >= 3:
+                oldest_tweet = min(active_tweets)
+                self.redis.srem(self.KEY_PREFIX['active_tweets'], oldest_tweet)
+                self.redis.delete(f"{self.KEY_PREFIX['tweet_info']}{oldest_tweet}")
 
-            if active_count >= 3:
-                cursor.execute("""
-                    UPDATE monitored_tweets SET is_active = FALSE
-                    WHERE tweet_id = (
-                        SELECT tweet_id FROM monitored_tweets 
-                        WHERE is_active = TRUE ORDER BY tweet_id ASC LIMIT 1
-                    )
-                """)
-
-            cursor.execute("""
-                INSERT INTO monitored_tweets 
-                (tweet_id, like_points, retweet_points, reply_points)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(tweet_id) DO UPDATE SET
-                    is_active = TRUE,
-                    like_points = excluded.like_points,
-                    retweet_points = excluded.retweet_points,
-                    reply_points = excluded.reply_points
-            """, (tweet_id, points['like'], points['retweet'], points['reply']))
+            tweet_data = {
+                'like_points': points['like'],
+                'retweet_points': points['retweet'],
+                'reply_points': points['reply'],
+                'created_at': datetime.now().isoformat()
+            }
             
-            self.conn.commit()
+            self.redis.sadd(self.KEY_PREFIX['active_tweets'], tweet_id)
+            self.redis.hset(
+                f"{self.KEY_PREFIX['tweet_info']}{tweet_id}",
+                mapping=tweet_data
+            )
+
         except Exception as e:
-            self.conn.rollback()
             logging.error(f"Error adding tweet {tweet_id}: {str(e)}")
             raise
 
     def get_active_tweets(self) -> List[Dict]:
-        cursor = self.conn.cursor()
-        rows = cursor.execute("""
-            SELECT 
-                tweet_id as id, 
-                like_points, 
-                retweet_points, 
-                reply_points
-            FROM monitored_tweets 
-            WHERE is_active = TRUE
-            ORDER BY created_at DESC
-        """).fetchall()
-        
-        return [{
-            'id': row['id'],
-            'points': {
-                'like': row['like_points'],
-                'retweet': row['retweet_points'],
-                'reply': row['reply_points']
-            }
-        } for row in rows]
+        try:
+            active_tweets = self.redis.smembers(self.KEY_PREFIX['active_tweets'])
+            result = []
+            
+            for tweet_id in active_tweets:
+                tweet_data = self.redis.hgetall(f"{self.KEY_PREFIX['tweet_info']}{tweet_id}")
+                if tweet_data:
+                    result.append({
+                        'id': tweet_id,
+                        'points': {
+                            'like': float(tweet_data['like_points']),
+                            'retweet': float(tweet_data['retweet_points']),
+                            'reply': float(tweet_data['reply_points'])
+                        }
+                    })
+            
+            return sorted(result, key=lambda x: x.get('created_at', ''), reverse=True)
+
+        except Exception as e:
+            logging.error(f"Error getting active tweets: {str(e)}")
+            raise
 
     def update_points(self, user_id: str, username: str, points: int) -> None:
         try:
-            self.conn.execute("""
-                INSERT INTO user_points (user_id, username, points, last_updated)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    points = points + ?,
-                    username = ?,
-                    last_updated = CURRENT_TIMESTAMP
-            """, (user_id, username, points, points, username))
-            self.conn.commit()
+            pipeline = self.redis.pipeline()
+            
+            pipeline.hincrby(f"{self.KEY_PREFIX['user_points']}{user_id}", "points", points)
+            
+            pipeline.hset(
+                f"{self.KEY_PREFIX['user_info']}{user_id}",
+                mapping={
+                    'username': username,
+                    'last_updated': datetime.now().isoformat()
+                }
+            )
+            
+            pipeline.execute()
+
         except Exception as e:
-            self.conn.rollback()
             logging.error(f"Error updating points for user {user_id}: {str(e)}")
             raise
 
     def get_points(self, user_id: str) -> int:
-        cursor = self.conn.cursor()
-        result = cursor.execute(
-            "SELECT points FROM user_points WHERE user_id = ?",
-            (user_id,)
-        ).fetchone()
-        return result['points'] if result else 0
+        try:
+            points = self.redis.hget(f"{self.KEY_PREFIX['user_points']}{user_id}", "points")
+            return int(points) if points else 0
+        except Exception as e:
+            logging.error(f"Error getting points for user {user_id}: {str(e)}")
+            raise
 
     def remove_monitored_tweet(self, tweet_id: str) -> bool:
-        """
-        Remove a tweet from monitoring
-        Returns True if tweet was found and removed, False otherwise
-        """
         try:
-            cursor = self.conn.cursor()
-            cursor.execute(
-                "DELETE FROM monitored_tweets WHERE tweet_id = ?",
-                (tweet_id,)
-            )
-            self.conn.commit()
-            return cursor.rowcount > 0
+            pipeline = self.redis.pipeline()
+            
+            pipeline.delete(f"{self.KEY_PREFIX['tweet_info']}{tweet_id}")
+            pipeline.srem(self.KEY_PREFIX['active_tweets'], tweet_id)
+            
+            results = pipeline.execute()
+            return any(result for result in results)
+
         except Exception as e:
-            self.conn.rollback()
-            raise e
+            logging.error(f"Error removing tweet {tweet_id}: {str(e)}")
+            raise
 
     def backup_database(self, backup_dir: str = './backup') -> None:
         try:
             os.makedirs(backup_dir, mode=0o700, exist_ok=True)
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
+            backup_path = os.path.join(backup_dir, f'points_{timestamp}.json')
             
-            with open(backup_path, 'wb', opener=lambda p,f: os.open(p, f, 0o600)) as f:
-                for line in self.conn.iterdump():
-                    f.write(f'{line}\n'.encode())
-                    
+            backup_data = {
+                'user_points': {},
+                'user_info': {},
+                'active_tweets': list(self.redis.smembers(self.KEY_PREFIX['active_tweets'])),
+                'tweet_info': {}
+            }
+            
+            for key in self.redis.scan_iter(f"{self.KEY_PREFIX['user_points']}*"):
+                user_id = key.split(':')[-1]
+                backup_data['user_points'][user_id] = self.redis.hgetall(key)
+                info_key = f"{self.KEY_PREFIX['user_info']}{user_id}"
+                backup_data['user_info'][user_id] = self.redis.hgetall(info_key)
+            
+            for tweet_id in backup_data['active_tweets']:
+                info_key = f"{self.KEY_PREFIX['tweet_info']}{tweet_id}"
+                backup_data['tweet_info'][tweet_id] = self.redis.hgetall(info_key)
+            
+            with open(backup_path, 'w', opener=lambda p,f: os.open(p, f, 0o600)) as f:
+                json.dump(backup_data, f, indent=2)
+                
         except Exception as e:
             logging.error(f"Backup failed: {str(e)}")
+            raise
+
+    def restore_from_backup(self, backup_path: str) -> None:
+        try:
+            with open(backup_path, 'r') as f:
+                backup_data = json.load(f)
+            
+            pipeline = self.redis.pipeline()
+            
+            for user_id, points_data in backup_data['user_points'].items():
+                pipeline.hset(f"{self.KEY_PREFIX['user_points']}{user_id}", mapping=points_data)
+            
+            for user_id, info_data in backup_data['user_info'].items():
+                pipeline.hset(f"{self.KEY_PREFIX['user_info']}{user_id}", mapping=info_data)
+            
+            pipeline.delete(self.KEY_PREFIX['active_tweets'])
+            if backup_data['active_tweets']:
+                pipeline.sadd(self.KEY_PREFIX['active_tweets'], *backup_data['active_tweets'])
+            
+            for tweet_id, tweet_data in backup_data['tweet_info'].items():
+                pipeline.hset(f"{self.KEY_PREFIX['tweet_info']}{tweet_id}", mapping=tweet_data)
+            
+            pipeline.execute()
+            
+        except Exception as e:
+            logging.error(f"Restore failed: {str(e)}")
             raise
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.conn.close()
+        self.redis.close()
