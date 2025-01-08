@@ -5,4 +5,3 @@ from .twitter_service import TwitterService
 
 __version__ = '1.0.0'
 __all__ = ['PointsBot', 'DatabaseService', 'TwitterService']
-

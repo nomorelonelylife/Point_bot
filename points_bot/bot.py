@@ -33,14 +33,14 @@ class PointsBot(discord.Client):
         twitter_token: str, 
         channel_id: str, 
         og_role_id: str,
-        redis_url: Optional[str] = None  
+        db_path: Optional[str] = None
     ):
         intents = discord.Intents.default()
         intents.members = True
         super().__init__(intents=intents)
         
         self.tree = app_commands.CommandTree(self)
-        self.db = DatabaseService(redis_url or 'redis://localhost:6379/0')  
+        self.db = DatabaseService(db_path or './points.db')
         self.twitter = TwitterService(twitter_token)
         self.channel_id = int(channel_id)
         self.og_role_id = int(og_role_id)
@@ -252,24 +252,21 @@ class PointsBot(discord.Client):
                 await interaction.response.defer(ephemeral=True)
 
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                backup_dir = './temp_export'
-                os.makedirs(backup_dir, mode=0o700, exist_ok=True)
-                backup_path = os.path.join(backup_dir, f'points_{timestamp}.json')
-        
+                temp_path = f'./temp_export_{timestamp}.db'
+                
                 try:
-                    self.db.backup_database(backup_dir)
-            
+                    self.db.conn.execute('PRAGMA wal_checkpoint(FULL)')
+                    shutil.copy2(self.db.db_path, temp_path)
+                    
                     await interaction.followup.send(
                         "Here's your database export:",
-                        file=discord.File(backup_path, filename=f'points_{timestamp}.json'),
+                        file=discord.File(temp_path, filename=f'points_{timestamp}.db'),
                         ephemeral=True
                     )
                 finally:
-                    if os.path.exists(backup_path):
-                        os.remove(backup_path)
-                    if os.path.exists(backup_dir):
-                        os.rmdir(backup_dir)
-  
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+
             except Exception as e:
                 self.error_logger.log_error(e, "exportdb command")
                 await interaction.followup.send(
@@ -341,13 +338,23 @@ class PointsBot(discord.Client):
     @tasks.loop(hours=24)
     async def backup_database(self):
         try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_dir = './backup'
-        
-            self.db.backup_database(backup_dir)
-
-            cutoff = (datetime.now() - timedelta(days=5))
+            backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
+       
+            if os.path.exists(backup_dir):
+                stat = os.stat(backup_dir)
+                if stat.st_mode & 0o777 != 0o700:
+                    os.chmod(backup_dir, 0o700)
+            else:
+                os.makedirs(backup_dir, mode=0o700)
+           
+            self.db.backup_database(backup_path)
+            os.chmod(backup_path, 0o600)
+       
+            cutoff = (datetime.now() - timedelta(days=7))
             for f in os.listdir(backup_dir):
-                if f.startswith('points_') and (f.endswith('.db') or f.endswith('.json')):
+                if f.startswith('points_') and f.endswith('.db'):
                     file_path = os.path.join(backup_dir, f)
                     if datetime.fromtimestamp(os.path.getctime(file_path)) < cutoff:
                         os.remove(file_path)
@@ -361,6 +368,8 @@ class PointsBot(discord.Client):
         await self.wait_until_ready()
 
     async def close(self):
+        if hasattr(self, 'db'):
+            self.db.conn.close()
         await super().close()
 
     async def on_ready(self):
