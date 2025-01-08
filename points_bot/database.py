@@ -117,15 +117,22 @@ class DatabaseService:
         ).fetchone()
         return result['points'] if result else 0
 
-    def get_leaderboard(self, limit: int = 10) -> List[Dict]:
-        cursor = self.conn.cursor()
-        rows = cursor.execute("""
-            SELECT username, points 
-            FROM user_points 
-            ORDER BY points DESC 
-            LIMIT ?
-        """, (limit,)).fetchall()
-        return [dict(row) for row in rows]
+    def remove_monitored_tweet(self, tweet_id: str) -> bool:
+        """
+        Remove a tweet from monitoring
+        Returns True if tweet was found and removed, False otherwise
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "DELETE FROM monitored_tweets WHERE tweet_id = ?",
+                (tweet_id,)
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            self.conn.rollback()
+            raise e
 
     def backup_database(self, backup_dir: str = './backup') -> None:
         try:

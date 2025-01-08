@@ -118,6 +118,52 @@ class PointsBot(discord.Client):
                     "An error occurred while adding the tweet",
                     ephemeral=True
                 )
+        
+
+        @self.tree.command(name="removetweet", description="Remove a monitored tweet")
+        @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.describe(
+            tweet_id="Tweet ID or full URL to remove from monitoring"
+        )
+        async def removetweet(
+            interaction: discord.Interaction,
+            tweet_id: str
+        ):
+            try:
+                # Check if input is a URL
+                if "twitter.com" in tweet_id or "x.com" in tweet_id:
+                    extracted_id = self.validate_tweet_url(tweet_id)
+                    if not extracted_id:
+                        await interaction.response.send_message(
+                            "Invalid tweet URL format",
+                            ephemeral=True
+                        )
+                        return
+                    tweet_id = extracted_id
+        
+                # Remove from database
+                if self.db.remove_monitored_tweet(tweet_id):
+                    await interaction.response.send_message(
+                        f"Tweet {tweet_id} has been removed from monitoring",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "Tweet not found in monitored list",
+                        ephemeral=True
+                    )
+
+            except Exception as e:
+                self.error_logger.log_error(e, "removetweet command")
+                await interaction.response.send_message(
+                    "An error occurred while removing the tweet",
+                    ephemeral=True
+                )
+
+
+
+
+
 
         @self.tree.command(name="points", description="Check your points")
         async def points(interaction: discord.Interaction):
