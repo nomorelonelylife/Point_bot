@@ -325,8 +325,8 @@ class PointsBot(discord.Client):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 temp_path = f'./temp_export_{timestamp}.db'
                 try:
-                    await asyncio.to_thread(lambda: self.db.conn.execute('PRAGMA wal_checkpoint(FULL)'))
-                    
+                    await self.db.checkpoint()
+
                     shutil.copy2(self.db.db_path, temp_path)
             
                     await interaction.followup.send(

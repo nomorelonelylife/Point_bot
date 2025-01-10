@@ -188,6 +188,15 @@ class DatabaseService:
             db_operation
         )
 
+    async def checkpoint(self):
+        def db_operation():
+            self.conn.execute('PRAGMA wal_checkpoint(FULL)')
+        
+        await asyncio.get_event_loop().run_in_executor(
+            self.pool,
+            db_operation
+        
+        )
     def __enter__(self):
         return self
 
