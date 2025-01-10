@@ -8,7 +8,7 @@ from .bot import PointsBot
 
 def setup_logging():
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
@@ -41,6 +41,8 @@ def main():
         
         validate_env(required_envs)
 
+        print("Creating bot instance...")
+        logging.info("Creating bot instance...")
 
         bot = PointsBot(
             twitter_token=os.getenv('TWITTER_BEARER_TOKEN'),
@@ -49,10 +51,13 @@ def main():
             db_path=os.getenv('DB_PATH')
         )
         
+        print("Running bot...")
+        logging.info("Running bot...")
         bot.run(os.getenv('DISCORD_TOKEN'))
 
     except Exception as e:
         logging.critical(f"Fatal error: {str(e)}")
+        print(f"Fatal error: {str(e)}")
         sys.exit(1)
 
 if __name__ == '__main__':

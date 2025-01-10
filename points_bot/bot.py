@@ -58,9 +58,23 @@ class PointsBot(discord.Client):
         return None
 
     async def setup_hook(self):
-        await self.register_commands()
-        self.check_tweets.start()
-        self.backup_database.start()
+        print("Setup hook started...")
+        logging.info("Setup hook started...")
+    
+        try:
+            await self.register_commands()
+            print("Register commands completed.")
+            logging.info("Register commands completed.")
+        
+            self.check_tweets.start()
+            self.backup_database.start()
+        
+            print("Background tasks started.")
+            logging.info("Background tasks started.")
+        except Exception as e:
+            print(f"Error in setup_hook: {e}")
+            logging.error(f"Error in setup_hook: {e}")
+            raise
 
     async def register_commands(self):
         @self.tree.command(name="addtweet", description="Add tweet to monitor")
