@@ -228,7 +228,72 @@ class PointsBot(discord.Client):
                     "An error occurred while checking tweets",
                     ephemeral=True
                 )
+        
 
+
+
+        @self.tree.command(name="exportlog", description="Export bot log file (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        async def exportlog(
+            interaction: discord.Interaction, 
+            lines: Optional[int] = 100
+        ):
+            try:
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        "This command can only be used in a server", 
+                        ephemeral=True
+                    )
+                    return
+
+                log_path = 'bot.log'
+                if not os.path.exists(log_path):
+                    await interaction.response.send_message(
+                        "Log file not found.", 
+                        ephemeral=True
+                    )
+                    return
+
+                def read_last_lines(file_path, num_lines):
+                    with open(file_path, 'r') as f:
+                        lines = f.readlines()
+                        return lines[-num_lines:]
+
+                last_lines = read_last_lines(log_path, lines)
+        
+
+                if len(''.join(last_lines)) > 8000:
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    temp_log_path = f'./temp_log_{timestamp}.txt'
+                    with open(temp_log_path, 'w') as f:
+                        f.writelines(last_lines)
+            
+                    try:
+                        await interaction.response.send_message(
+                            f"Last {lines} lines of log file:",
+                            file=discord.File(temp_log_path, filename=f'bot_log_{timestamp}.txt'),
+                            ephemeral=True
+                        )
+                    finally:
+                
+                        if os.path.exists(temp_log_path):
+                            os.remove(temp_log_path)
+                else:
+
+                    log_content = '```\n' + ''.join(last_lines) + '\n```'
+                    await interaction.response.send_message(
+                        f"Last {lines} lines of log file:\n" + log_content, 
+                        ephemeral=True
+                    )
+
+            except Exception as e:
+                self.error_logger.log_error(e, "exportlog command")
+                await interaction.response.send_message(
+                    "An error occurred while exporting the log file", 
+                    ephemeral=True
+                )
+
+                
         @self.tree.command(name="exportdb", description="Export current database (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
         async def exportdb(interaction: discord.Interaction):
@@ -240,12 +305,12 @@ class PointsBot(discord.Client):
                     )
                     return
 
-                #if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
-                 #   await interaction.response.send_message(
-                 #       "For security reasons, this command can only be used in private channels",
-                  #      ephemeral=True
-                  #  )
-                  #  return
+                if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
+                    await interaction.response.send_message(
+                        "For security reasons, this command can only be used in private channels",
+                        ephemeral=True
+                    )
+                    return
 
                 await interaction.response.defer(ephemeral=True)
 
