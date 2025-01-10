@@ -240,12 +240,12 @@ class PointsBot(discord.Client):
                     )
                     return
 
-                if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
-                    await interaction.response.send_message(
-                        "For security reasons, this command can only be used in private channels",
-                        ephemeral=True
-                    )
-                    return
+                #if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
+                 #   await interaction.response.send_message(
+                 #       "For security reasons, this command can only be used in private channels",
+                  #      ephemeral=True
+                  #  )
+                  #  return
 
                 await interaction.response.defer(ephemeral=True)
 
