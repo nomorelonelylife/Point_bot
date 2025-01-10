@@ -406,7 +406,7 @@ class PointsBot(discord.Client):
                 await channel.send(
                     f"🎉 Points Update:\n"
                     f"Tweet: https://twitter.com/x/status/{tweet['id']}\n"
-                    f"Each OG member received {points} points!"
+                    f"Congrats! Each OG member received {points} points!"
                 )
                 
         except Exception as e:
