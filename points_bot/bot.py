@@ -62,9 +62,10 @@ class PointsBot(discord.Client):
         logging.info("Setup hook started...")
     
         try:
+
             await self.register_commands()
-            print("Register commands completed.")
-            logging.info("Register commands completed.")
+            print("Commands registered in setup_hook")
+            logging.info("Commands registered in setup_hook")
         
             self.check_tweets.start()
             self.backup_database.start()
@@ -352,7 +353,7 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
 
-        await self.tree.sync()
+        await self.tree.sync(guild=None)
 
     async def _process_tweets(self) -> list:
         """
@@ -453,3 +454,5 @@ class PointsBot(discord.Client):
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
         print('------')
+    
+ 
