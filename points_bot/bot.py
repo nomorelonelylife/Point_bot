@@ -313,16 +313,16 @@ class PointsBot(discord.Client):
         @app_commands.checks.has_permissions(administrator=True)
         async def exportdb(interaction: discord.Interaction):
             try:
-                if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
+                if not interaction.guild:
                     await interaction.response.send_message(
-                        "This command can only be used in a server text channel",
+                        "This command can only be used in a server",
                         ephemeral=True
                     )
                     return
 
-                if interaction.channel.permissions_for(interaction.guild.default_role).view_channel:
+                if not interaction.channel.permissions_for(interaction.user).administrator:
                     await interaction.response.send_message(
-                        "For security reasons, this command can only be used in private channels",
+                        "This command can only be used in admin channels",
                         ephemeral=True
                     )
                     return
@@ -331,27 +331,54 @@ class PointsBot(discord.Client):
 
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 temp_path = f'./temp_export_{timestamp}.db'
-                
+        
                 try:
-             
                     await asyncio.to_thread(lambda: self.db.conn.execute('PRAGMA wal_checkpoint(FULL)'))
-                    await asyncio.to_thread(lambda: shutil.copy2(self.db.db_path, temp_path))
-            
+                    async def backup_db():
+                        with sqlite3.connect(temp_path) as temp_db:
+                            await asyncio.to_thread(
+                                lambda: self.db.conn.backup(temp_db)
+                            )
+                    await backup_db()
+         
+                    os.chmod(temp_path, 0o600)
+
                     await interaction.followup.send(
                         "Here's your database export:",
                         file=discord.File(temp_path, filename=f'points_{timestamp}.db'),
                         ephemeral=True
                     )
+                except sqlite3.Error as e:
+                    logging.error(f"Database error during export: {e}")
+                    await interaction.followup.send(
+                        "A database error occurred while exporting",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    logging.error(f"Error during database export: {e}")
+                    await interaction.followup.send(
+                        "An unexpected error occurred while exporting the database",
+                        ephemeral=True
+                    )
                 finally:
                     if os.path.exists(temp_path):
-                        os.remove(temp_path)
+                        try:
+                            os.remove(temp_path)
+                        except Exception as e:
+                            logging.error(f"Error removing temp file: {e}")
 
             except Exception as e:
                 self.error_logger.log_error(e, "exportdb command")
-                await interaction.followup.send(
-                    "An error occurred while exporting the database",
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "An error occurred while exporting the database",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "An error occurred while exporting the database",
+                        ephemeral=True
+                    )
 
         await self.tree.sync(guild=None)
 
