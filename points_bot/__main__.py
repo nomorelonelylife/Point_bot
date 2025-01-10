@@ -49,7 +49,7 @@ def main():
             db_path=os.getenv('DB_PATH')
         )
         
-        bot.run(os.getenv('DISCORD_TOKEN'), log_handler=None)
+        bot.run(os.getenv('DISCORD_TOKEN'))
 
     except Exception as e:
         logging.critical(f"Fatal error: {str(e)}")
