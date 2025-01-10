@@ -190,7 +190,8 @@ class DatabaseService:
 
     async def checkpoint(self):
         def db_operation():
-            self.conn.execute('PRAGMA wal_checkpoint(FULL)')
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('PRAGMA wal_checkpoint(FULL)')
         
         await asyncio.get_event_loop().run_in_executor(
             self.pool,
