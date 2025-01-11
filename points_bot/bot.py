@@ -324,9 +324,12 @@ class PointsBot(discord.Client):
                     )
             
             except Exception as e:
+                error_msg = f"Error in tip command: {str(e)}"
+                print(error_msg)  
+                logging.error(error_msg) 
                 self.error_logger.log_error(e, "tip command")
                 await interaction.response.send_message(
-                    "An error occurred while processing the tip",
+                    f"An error occurred while processing the tip: {str(e)}",
                     ephemeral=True
                 )
 
