@@ -618,7 +618,7 @@ class PointsBot(discord.Client):
             except Exception as e:
                 self.error_logger.log_error(e, "members command")
                 await interaction.followup.send(
-                    "An error occurred while executing this command",
+                    f"An error occurred while executing this command: {str(e)}",  
                     ephemeral=True
                 )
 
@@ -672,9 +672,9 @@ class PointsBot(discord.Client):
                     os.remove(filepath)
             
             except Exception as e:
-                self.error_logger.log_error(e, "rolemembers command")
+                self.error_logger.log_error(e, "members command")
                 await interaction.followup.send(
-                    "An error occurred while executing this command",
+                    f"An error occurred while executing this command: {str(e)}",  
                     ephemeral=True
                 )
 
