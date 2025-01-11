@@ -581,13 +581,14 @@ class PointsBot(discord.Client):
         @app_commands.checks.has_permissions(administrator=True)
         async def members(interaction: discord.Interaction):
             if not interaction.guild:
-                await interaction.response.send_message(
+                await interaction.response.send_message( 
                     "This command can only be used in a server",
                     ephemeral=True
                 )
                 return
     
             try:
+                await interaction.response.defer(ephemeral=True)
                 # Get all members
                 members = await interaction.guild.fetch_members().flatten()
         
@@ -604,7 +605,7 @@ class PointsBot(discord.Client):
                             'roles': ', '.join(role.name for role in member.roles)
                         })
         
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"Here's a list of {len(members)} members!",
                     file=discord.File(filepath),
                     ephemeral=True
@@ -616,7 +617,7 @@ class PointsBot(discord.Client):
             
             except Exception as e:
                 self.error_logger.log_error(e, "members command")
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "An error occurred while executing this command",
                     ephemeral=True
                 )
@@ -634,12 +635,13 @@ class PointsBot(discord.Client):
                 return
     
             try:
+                await interaction.response.defer(ephemeral=True)
                 # Get members with the specified role
                 members = [member for member in await interaction.guild.fetch_members().flatten()
                           if role in member.roles]
         
                 if not members:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         f"No members found with the role {role.name}",
                         ephemeral=True
                     )
@@ -659,7 +661,7 @@ class PointsBot(discord.Client):
                             'roles': ', '.join(role.name for role in member.roles)
                         })
         
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"Here's a list of {len(members)} members with the role {role.name}!",
                     file=discord.File(filepath),
                     ephemeral=True
@@ -671,7 +673,7 @@ class PointsBot(discord.Client):
             
             except Exception as e:
                 self.error_logger.log_error(e, "rolemembers command")
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "An error occurred while executing this command",
                     ephemeral=True
                 )
