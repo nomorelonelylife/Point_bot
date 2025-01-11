@@ -333,6 +333,108 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
 
+        
+        @self.tree.command(name="airdrop", description="Airdrop points to users with a specific role or to specific user (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.describe(
+            role="Role to airdrop points to (optional)",
+            user="Specific user to airdrop points to (optional)",
+            amount="Amount of points to airdrop (can be decimal)"
+        )
+        async def airdrop(
+            interaction: discord.Interaction,
+            amount: float,
+            role: Optional[discord.Role] = None,
+            user: Optional[discord.User] = None
+        ):
+            try:
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        "This command can only be used in a server",
+                        ephemeral=True
+                    )
+                    return
+
+                if role is None and user is None:
+                    await interaction.response.send_message(
+                        "You must specify either a role or a user to airdrop points to",
+                        ephemeral=True
+                    )
+                    return
+
+                if role is not None and user is not None:
+                    await interaction.response.send_message(
+                        "Please specify either a role OR a user, not both",
+                        ephemeral=True
+                    )
+                    return
+
+                amount = round(amount, 8)
+                if amount <= 0:
+                    await interaction.response.send_message(
+                        "Amount must be positive",
+                        ephemeral=True
+                    )
+                    return
+
+                recipients = []
+                if role:
+                    # Get all members with the specified role
+                    recipients = [member for member in interaction.guild.members if role in member.roles]
+                    if not recipients:
+                        await interaction.response.send_message(
+                            f"No members found with the role {role.name}",
+                            ephemeral=True
+                        )
+                        return
+                else:
+                    # Single user airdrop
+                    recipients = [user]
+
+                # Update points for all recipients
+                for recipient in recipients:
+                    await self.db.update_points(
+                        str(recipient.id),
+                        recipient.name,
+                        amount
+                    )
+
+                # Format points for display
+                formatted_amount = f"{amount:.8f}"
+
+                # Create mention string for announcement
+                if role:
+                    mention_str = role.mention
+                else:
+                    mention_str = user.mention
+
+                # Send ephemeral confirmation to admin
+                await interaction.response.send_message(
+                    f"Successfully airdropped {formatted_amount} points to {'the role ' + role.name if role else user.name}!",
+                    ephemeral=True
+                )
+
+                # Send public announcement in the channel
+                channel = interaction.channel
+                if channel:
+                    announcement = f"🪂 Airdrop coming! {mention_str} check your {formatted_amount} points!!"
+                    try:
+                        await channel.send(
+                            announcement,
+                            allowed_mentions=discord.AllowedMentions(
+                                roles=True if role else False,
+                                users=False if role else True
+                            )
+                        )
+                    except discord.errors.Forbidden:
+                        logging.error("Failed to send airdrop announcement due to permissions")
+
+            except Exception as e:
+                self.error_logger.log_error(e, "airdrop command")
+                await interaction.response.send_message(
+                    f"An error occurred while processing the airdrop: {str(e)}",
+                    ephemeral=True
+                )
 
 
         @self.tree.command(name="exportlog", description="Export bot log file (Admin only)")
