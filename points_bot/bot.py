@@ -181,8 +181,9 @@ class PointsBot(discord.Client):
         async def points(interaction: discord.Interaction):
             try:
                 points = await self.db.get_points(str(interaction.user.id))
+                formatted_points = f"{points:.8f}"
                 await interaction.response.send_message(
-                    f"You have {points} points",
+                    f"You have {formatted_points} points",
                     ephemeral=True
                 )
             except Exception as e:
@@ -224,7 +225,7 @@ class PointsBot(discord.Client):
                 
                 if points_updates:
                     summary = "\n".join([
-                        f"Tweet {update['tweet_id']}: {update['points']} points awarded"
+                        f"Tweet {update['tweet_id']}: {update['points']:.8f} points awarded"
                         for update in points_updates
                     ])
                     await interaction.followup.send(
@@ -244,6 +245,85 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
         
+
+        @self.tree.command(name="tip", description="Tip points to another user")
+        @app_commands.describe(
+            user="User to tip points to",
+            amount="Amount of points to tip (can be decimal, up to 8 decimal places)"
+        )
+        async def tip(
+            interaction: discord.Interaction,
+            user: discord.User,
+            amount: float
+        ):
+            try:
+                amount = round(amount, 8)
+
+                if amount <= 0:
+                    await interaction.response.send_message(
+                        "Tip amount must be positive",
+                        ephemeral=True
+                    )
+                    return
+            
+                if amount < 0.00000001:  
+                    await interaction.response.send_message(
+                        "Minimum tip amount is 0.00000001 points",
+                        ephemeral=True
+                    )
+                    return
+            
+                if user.id == interaction.user.id:
+                    await interaction.response.send_message(
+                        "You cannot tip points to yourself",
+                        ephemeral=True
+                    )
+                    return
+            
+                # Attempt to transfer the points
+                success = await self.db.transfer_points(
+                    str(interaction.user.id),
+                    str(user.id),
+                    amount
+                )
+        
+                if success:
+                    # Get updated points for both users
+                    sender_points = await self.db.get_points(str(interaction.user.id))
+                    receiver_points = await self.db.get_points(str(user.id))
+            
+                    # Format points with 8 decimal places
+                    formatted_amount = f"{amount:.8f}"
+                    formatted_sender = f"{sender_points:.8f}"
+                    formatted_receiver = f"{receiver_points:.8f}"
+            
+                    # Send ephemeral confirmation to the tipper
+                    await interaction.response.send_message(
+                        f"Successfully tipped {formatted_amount} points to {user.mention}!\n"
+                        f"Your new balance: {formatted_sender} points\n"
+                        f"{user.name}'s new balance: {formatted_receiver} points",
+                        ephemeral=True
+                    )
+            
+                    # Send public announcement
+                    channel = interaction.channel
+                    if isinstance(channel, discord.TextChannel):
+                        await channel.send(
+                            f"💰 Tip successful!!! {interaction.user.mention} tipped {formatted_amount} points to {user.mention}!"
+                        )
+                
+                else:
+                    await interaction.response.send_message(
+                        "You don't have enough points for this tip",
+                        ephemeral=True
+                    )
+            
+            except Exception as e:
+                self.error_logger.log_error(e, "tip command")
+                await interaction.response.send_message(
+                    "An error occurred while processing the tip",
+                    ephemeral=True
+                )
 
 
 
@@ -403,10 +483,11 @@ class PointsBot(discord.Client):
                     "points": points
                 })
 
+                formatted_points = f"{points:.8f}"
                 await channel.send(
                     f"🎉 Points Update:\n"
                     f"Tweet: https://twitter.com/x/status/{tweet['id']}\n"
-                    f"Congrats! Each OG member received {points} points!"
+                    f"Congrats! Each OG member received {formatted_points} points!"
                 )
                 
         except Exception as e:

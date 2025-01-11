@@ -55,19 +55,21 @@ class TwitterService:
             print(f"Error fetching tweet {tweet_id}: {str(e)}")
             return None
 
-    async def calculate_points(self, tweet_id: str, weights: Dict[str, float]) -> int:
+    async def calculate_points(self, tweet_id: str, weights: Dict[str, float]) -> float:
         try:
             tweet = await self.rate_limited_request(tweet_id)
             if not tweet or not tweet.data:
-                return 0
-                
+                return 0.0
+            
             metrics = tweet.data.public_metrics
-            return int(
+            points = (
                 (metrics['reply_count'] * weights['reply']) +
                 (metrics['retweet_count'] * weights['retweet']) +
                 (metrics['like_count'] * weights['like'])
             )
-            
+        
+            return round(float(points), 8)
+        
         except Exception as e:
             print(f"Error calculating points for tweet {tweet_id}: {str(e)}")
-            return 0
+            return 0.0

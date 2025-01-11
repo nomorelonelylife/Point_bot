@@ -20,41 +20,129 @@ class DatabaseService:
         self.initialize()
 
     def initialize(self):
+        """Initialize database tables if they don't exist"""
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS user_points (
                 user_id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
-                points INTEGER DEFAULT 0,
+                points REAL DEFAULT 0,
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS monitored_tweets (
                 tweet_id TEXT PRIMARY KEY,
                 is_active BOOLEAN DEFAULT TRUE,
-                like_points FLOAT DEFAULT 1,
-                retweet_points FLOAT DEFAULT 2,
-                reply_points FLOAT DEFAULT 1,
+                like_points REAL DEFAULT 1,
+                retweet_points REAL DEFAULT 2,
+                reply_points REAL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
         self.conn.commit()
 
-    async def get_points(self, user_id: str) -> int:
+    async def get_points(self, user_id: str) -> float:
+        """
+        Get points for a user
+        Returns current points as float with 8 decimal precision
+        """
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 result = conn.execute(
-                    "SELECT points FROM user_points WHERE user_id = ?",
+                    "SELECT ROUND(points, 8) as points FROM user_points WHERE user_id = ?",
                     (user_id,)
                 ).fetchone()
-                return result['points'] if result else 0
+                return float(result['points'] if result else 0)
 
         return await asyncio.get_event_loop().run_in_executor(
             self.pool, 
             db_operation
         )
 
+    async def update_points(self, user_id: str, username: str, points: float) -> None:
+        """
+        Update points for a user
+        Points are stored with 8 decimal precision
+        """
+        def db_operation():
+            points_rounded = round(points, 8)
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO user_points (user_id, username, points, last_updated)
+                    VALUES (?, ?, ROUND(?, 8), CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        points = ROUND(points + ?, 8),
+                        username = ?,
+                        last_updated = CURRENT_TIMESTAMP
+                """, (user_id, username, points_rounded, points_rounded, username))
+                conn.commit()
+
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                self.pool,
+                db_operation
+            )
+        except Exception as e:
+            logging.error(f"Error updating points for user {user_id}: {str(e)}")
+            raise
+
+    async def transfer_points(self, from_user_id: str, to_user_id: str, amount: float) -> bool:
+        """
+        Transfer points from one user to another
+        Amount is handled with 8 decimal precision
+        Returns True if transfer was successful, False otherwise
+        """
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                try:
+                    cursor = conn.cursor()
+                    # Check if sender has enough points
+                    current_points = cursor.execute(
+                        "SELECT points FROM user_points WHERE user_id = ?",
+                        (from_user_id,)
+                    ).fetchone()
+                    
+                    if not current_points or float(current_points[0]) < amount:
+                        return False
+                        
+                    # Round to 8 decimal places
+                    amount = round(amount, 8)
+                    
+                    cursor.execute("BEGIN TRANSACTION")
+                    
+                    cursor.execute("""
+                        UPDATE user_points 
+                        SET points = ROUND(points - ?, 8),
+                            last_updated = CURRENT_TIMESTAMP
+                        WHERE user_id = ?
+                    """, (amount, from_user_id))
+                    
+                    cursor.execute("""
+                        INSERT INTO user_points (user_id, username, points, last_updated)
+                        VALUES (?, 'Unknown', ROUND(?, 8), CURRENT_TIMESTAMP)
+                        ON CONFLICT(user_id) DO UPDATE SET
+                            points = ROUND(points + ?, 8),
+                            last_updated = CURRENT_TIMESTAMP
+                    """, (to_user_id, amount, amount))
+                    
+                    cursor.execute("COMMIT")
+                    return True
+                    
+                except Exception as e:
+                    cursor.execute("ROLLBACK")
+                    logging.error(f"Error in transfer_points: {str(e)}")
+                    raise
+
+        return await asyncio.get_event_loop().run_in_executor(
+            self.pool,
+            db_operation
+        )
+
     async def add_monitored_tweet(self, tweet_id: str, points: Dict[str, float]) -> None:
+        """
+        Add a tweet to monitor
+        Points values are stored with 8 decimal precision
+        """
         def db_operation():
             try:
                 with sqlite3.connect(self.db_path) as conn:
@@ -77,12 +165,12 @@ class DatabaseService:
                     cursor.execute("""
                         INSERT INTO monitored_tweets 
                         (tweet_id, like_points, retweet_points, reply_points)
-                        VALUES (?, ?, ?, ?)
+                        VALUES (?, ROUND(?, 8), ROUND(?, 8), ROUND(?, 8))
                         ON CONFLICT(tweet_id) DO UPDATE SET
                             is_active = TRUE,
-                            like_points = excluded.like_points,
-                            retweet_points = excluded.retweet_points,
-                            reply_points = excluded.reply_points
+                            like_points = ROUND(excluded.like_points, 8),
+                            retweet_points = ROUND(excluded.retweet_points, 8),
+                            reply_points = ROUND(excluded.reply_points, 8)
                     """, (tweet_id, points['like'], points['retweet'], points['reply']))
                     
                     conn.commit()
@@ -96,15 +184,19 @@ class DatabaseService:
         )
 
     async def get_active_tweets(self) -> List[Dict]:
+        """
+        Get all active monitored tweets
+        Returns points values with 8 decimal precision
+        """
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute("""
                     SELECT 
                         tweet_id as id, 
-                        like_points, 
-                        retweet_points, 
-                        reply_points
+                        ROUND(like_points, 8) as like_points, 
+                        ROUND(retweet_points, 8) as retweet_points, 
+                        ROUND(reply_points, 8) as reply_points
                     FROM monitored_tweets 
                     WHERE is_active = TRUE
                     ORDER BY created_at DESC
@@ -113,9 +205,9 @@ class DatabaseService:
                 return [{
                     'id': row['id'],
                     'points': {
-                        'like': row['like_points'],
-                        'retweet': row['retweet_points'],
-                        'reply': row['reply_points']
+                        'like': float(row['like_points']),
+                        'retweet': float(row['retweet_points']),
+                        'reply': float(row['reply_points'])
                     }
                 } for row in rows]
 
@@ -124,29 +216,8 @@ class DatabaseService:
             db_operation
         )
 
-    async def update_points(self, user_id: str, username: str, points: int) -> None:
-        def db_operation():
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    INSERT INTO user_points (user_id, username, points, last_updated)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(user_id) DO UPDATE SET
-                        points = points + ?,
-                        username = ?,
-                        last_updated = CURRENT_TIMESTAMP
-                """, (user_id, username, points, points, username))
-                conn.commit()
-
-        try:
-            await asyncio.get_event_loop().run_in_executor(
-                self.pool,
-                db_operation
-            )
-        except Exception as e:
-            logging.error(f"Error updating points for user {user_id}: {str(e)}")
-            raise
-
     async def remove_monitored_tweet(self, tweet_id: str) -> bool:
+        """Remove a monitored tweet. Returns True if tweet was found and removed."""
         def db_operation():
             try:
                 with sqlite3.connect(self.db_path) as conn:
@@ -166,14 +237,15 @@ class DatabaseService:
             db_operation
         )
 
-    async def backup_database(self, backup_dir: str = './backup') -> None:
+    async def backup_database(self, backup_path: str) -> None:
+        """Create a backup of the database"""
         def db_operation():
             try:
+                # Ensure the backup directory exists with proper permissions
+                backup_dir = os.path.dirname(backup_path)
                 os.makedirs(backup_dir, mode=0o700, exist_ok=True)
                 
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                backup_path = os.path.join(backup_dir, f'points_{timestamp}.db')
-                
+                # Create backup with proper permissions
                 with sqlite3.connect(self.db_path) as conn:
                     with open(backup_path, 'wb', opener=lambda p,f: os.open(p, f, 0o600)) as f:
                         for line in conn.iterdump():
@@ -188,7 +260,8 @@ class DatabaseService:
             db_operation
         )
 
-    async def checkpoint(self):
+    async def checkpoint(self) -> None:
+        """Force a WAL checkpoint"""
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('PRAGMA wal_checkpoint(FULL)')
@@ -196,8 +269,8 @@ class DatabaseService:
         await asyncio.get_event_loop().run_in_executor(
             self.pool,
             db_operation
-        
         )
+
     def __enter__(self):
         return self
 
