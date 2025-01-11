@@ -388,6 +388,51 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
 
+        
+
+        @self.tree.command(name="generatepoints", description="Generate points for self (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.describe(
+            amount="Amount of points to generate (can be decimal)"
+        )
+        async def generatepoints(
+            interaction: discord.Interaction,
+            amount: float
+        ):
+            try:
+                amount = round(amount, 8)
+                
+                if amount <= 0:
+                    await interaction.response.send_message(
+                        "Amount must be positive",
+                        ephemeral=True
+                    )
+                    return
+
+                # Update points for the admin
+                await self.db.update_points(
+                    str(interaction.user.id),
+                    interaction.user.name,
+                    amount
+                )
+                
+                # Get updated balance
+                new_balance = await self.db.get_points(str(interaction.user.id))
+                formatted_balance = f"{new_balance:.8f}"
+                
+                await interaction.response.send_message(
+                    f"Successfully generated {amount:.8f} points.\nNew balance: {formatted_balance}",
+                    ephemeral=True
+                )
+
+            except Exception as e:
+                self.error_logger.log_error(e, "generatepoints command")
+                await interaction.response.send_message(
+                    "An error occurred while generating points",
+                    ephemeral=True
+                )
+
+
                 
         @self.tree.command(name="exportdb", description="Export current database (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
