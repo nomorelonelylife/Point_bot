@@ -499,6 +499,83 @@ class PointsBot(discord.Client):
                 )
 
 
+        @self.tree.command(name="exportbackup", description="Export a backup database file (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        async def exportbackup(
+            interaction: discord.Interaction,
+            days_ago: Optional[int] = 1
+        ):
+            try:
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        "This command can only be used in a server",
+                        ephemeral=True
+                    )
+                    return
+
+                await interaction.response.defer(ephemeral=True)
+
+                backup_dir = './backup'
+                if not os.path.exists(backup_dir):
+                    await interaction.followup.send(
+                        "No backup directory found.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Get list of backup files sorted by creation time
+                backup_files = []
+                for f in os.listdir(backup_dir):
+                    if f.startswith('points_') and f.endswith('.db'):
+                        file_path = os.path.join(backup_dir, f)
+                        backup_files.append((file_path, os.path.getctime(file_path)))
+                
+                backup_files.sort(key=lambda x: x[1], reverse=True)
+
+                if not backup_files:
+                    await interaction.followup.send(
+                        "No backup files found.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Get the requested backup file
+                try:
+                    requested_file = backup_files[days_ago - 1][0]
+                except IndexError:
+                    await interaction.followup.send(
+                        f"No backup file found from {days_ago} days ago. Available backups: {len(backup_files)}",
+                        ephemeral=True
+                    )
+                    return
+
+                # Send the backup file
+                try:
+                    await interaction.followup.send(
+                        f"Here's your backup database from {days_ago} day(s) ago:",
+                        file=discord.File(requested_file),
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    await interaction.followup.send(
+                        f"Error sending backup file: {str(e)}",
+                        ephemeral=True
+                    )
+
+            except Exception as e:
+                self.error_logger.log_error(e, "exportbackup command")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"An error occurred while exporting the backup: {str(e)}",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"An error occurred while exporting the backup: {str(e)}",
+                        ephemeral=True
+                    )
+
+
         @self.tree.command(name="exportdb", description="Export current database (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
         async def exportdb(interaction: discord.Interaction):
