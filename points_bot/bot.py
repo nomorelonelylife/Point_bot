@@ -590,7 +590,9 @@ class PointsBot(discord.Client):
             try:
                 await interaction.response.defer(ephemeral=True)
                 # Get all members
-                members = await interaction.guild.fetch_members().flatten()
+                members = []
+                async for member in interaction.guild.fetch_members():
+                    members.append(member)
         
                 # Prepare CSV data
                 filepath = os.path.join('output', 'members.csv')
@@ -637,8 +639,10 @@ class PointsBot(discord.Client):
             try:
                 await interaction.response.defer(ephemeral=True)
                 # Get members with the specified role
-                members = [member for member in await interaction.guild.fetch_members().flatten()
-                          if role in member.roles]
+                members = []
+                async for member in interaction.guild.fetch_members():
+                    if role in member.roles:
+                        members.append(member)
         
                 if not members:
                     await interaction.followup.send(
@@ -672,7 +676,7 @@ class PointsBot(discord.Client):
                     os.remove(filepath)
             
             except Exception as e:
-                self.error_logger.log_error(e, "members command")
+                self.error_logger.log_error(e, "rolemembers command")
                 await interaction.followup.send(
                     f"An error occurred while executing this command: {str(e)}",  
                     ephemeral=True
