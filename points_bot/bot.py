@@ -1,10 +1,11 @@
 import discord
 from discord import app_commands
 from discord.ext import tasks
-from typing import Optional
+from typing import Optional, List, Dict
 import re
 import logging
 import random
+import csv
 from collections import deque
 import asyncio
 import os
@@ -45,6 +46,8 @@ class PointsBot(discord.Client):
         self.channel_id = int(channel_id)
         self.og_role_id = int(og_role_id)
         self.error_logger = ErrorLogger()
+        os.makedirs('output', exist_ok=True)
+
 
     def validate_tweet_url(self, url: str) -> Optional[str]:
         patterns = [
@@ -574,6 +577,105 @@ class PointsBot(discord.Client):
                         f"An error occurred while exporting the backup: {str(e)}",
                         ephemeral=True
                     )
+        @self.tree.command(name="members", description="Export server members to a CSV file")
+        @app_commands.checks.has_permissions(administrator=True)
+        async def members(interaction: discord.Interaction):
+            if not interaction.guild:
+                await interaction.response.send_message(
+                    "This command can only be used in a server",
+                    ephemeral=True
+                )
+                return
+    
+            try:
+                # Get all members
+                members = await interaction.guild.fetch_members().flatten()
+        
+                # Prepare CSV data
+                filepath = os.path.join('output', 'members.csv')
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['id', 'username', 'joinDate', 'roles'])
+                    writer.writeheader()
+                    for member in members:
+                        writer.writerow({
+                            'id': member.id,
+                            'username': str(member),
+                            'joinDate': member.joined_at.strftime('%Y-%m-%d') if member.joined_at else 'Unknown',
+                            'roles': ', '.join(role.name for role in member.roles)
+                        })
+        
+                await interaction.response.send_message(
+                    f"Here's a list of {len(members)} members!",
+                    file=discord.File(filepath),
+                    ephemeral=True
+                )
+        
+                # Cleanup
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            
+            except Exception as e:
+                self.error_logger.log_error(e, "members command")
+                await interaction.response.send_message(
+                    "An error occurred while executing this command",
+                    ephemeral=True
+                )
+
+        
+        @self.tree.command(name="rolemembers", description="Export members with a specific role to CSV")
+        @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.describe(role="The role to export members of")
+        async def rolemembers(interaction: discord.Interaction, role: discord.Role):
+            if not interaction.guild:
+                await interaction.response.send_message(
+                    "This command can only be used in a server",
+                    ephemeral=True
+                )
+                return
+    
+            try:
+                # Get members with the specified role
+                members = [member for member in await interaction.guild.fetch_members().flatten()
+                          if role in member.roles]
+        
+                if not members:
+                    await interaction.response.send_message(
+                        f"No members found with the role {role.name}",
+                        ephemeral=True
+                    )
+                    return
+        
+                # Prepare CSV data
+                filename = f'role_members_{role.name}.csv'
+                filepath = os.path.join('output', filename)
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['id', 'username', 'joinDate', 'roles'])
+                    writer.writeheader()
+                    for member in members:
+                        writer.writerow({
+                            'id': member.id,
+                            'username': str(member),
+                            'joinDate': member.joined_at.strftime('%Y-%m-%d') if member.joined_at else 'Unknown',
+                            'roles': ', '.join(role.name for role in member.roles)
+                        })
+        
+                await interaction.response.send_message(
+                    f"Here's a list of {len(members)} members with the role {role.name}!",
+                    file=discord.File(filepath),
+                    ephemeral=True
+                )
+        
+                # Cleanup
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            
+            except Exception as e:
+                self.error_logger.log_error(e, "rolemembers command")
+                await interaction.response.send_message(
+                    "An error occurred while executing this command",
+                    ephemeral=True
+                )
+
 
 
         @self.tree.command(name="exportdb", description="Export current database (Admin only)")
