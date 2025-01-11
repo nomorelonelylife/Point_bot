@@ -305,12 +305,17 @@ class PointsBot(discord.Client):
                         ephemeral=True
                     )
             
-                    # Send public announcement
+                    # Send announcement in the current channel
                     channel = interaction.channel
-                    if isinstance(channel, discord.TextChannel):
-                        await channel.send(
-                            f"💰 Tip successful!!! {interaction.user.mention} tipped {formatted_amount} points to {user.mention}!"
-                        )
+                    if channel:  # Check if channel exists (includes both TextChannel and Thread)
+                        try:
+                            await channel.send(
+                                f"💰 Tip successful!!! {interaction.user.mention} tipped {formatted_amount} points to {user.mention}!",
+                                allowed_mentions=discord.AllowedMentions(users=[interaction.user, user])  # Only mention involved users
+                            )
+                        except discord.errors.Forbidden:
+                        # If bot doesn't have permission to send messages, silently continue
+                            pass
                 
                 else:
                     await interaction.response.send_message(
