@@ -6,19 +6,29 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import logging
+from discord.ext import tasks
 
 class DatabaseService:
     def __init__(self, db_path: str = "./points.db", max_connections: int = 60):
-        self.db_path = db_path
-        self.pool = ThreadPoolExecutor(max_workers=max_connections)
-        self.conn = sqlite3.connect(
-            db_path,
-            timeout=30.0,
-            isolation_level='EXCLUSIVE'
-        )
-        self.conn.execute('PRAGMA journal_mode=WAL')
-        self.conn.row_factory = sqlite3.Row
-        self.initialize()
+        try:
+            self.db_path = db_path
+            self.pool = ThreadPoolExecutor(max_workers=max_connections)
+            self.conn = sqlite3.connect(
+                db_path,
+                timeout=30.0,
+                isolation_level='EXCLUSIVE'
+            )
+            self.conn.execute('PRAGMA journal_mode=WAL')
+            self.conn.row_factory = sqlite3.Row
+            self.initialize()
+            self.schedule_cleanup.start()
+        except Exception as e:
+            logging.critical(f"Database initialization failed: {str(e)}")
+            if hasattr(self, 'pool'):
+                self.pool.shutdown(wait=False)
+            if hasattr(self, 'conn'):
+                self.conn.close()
+            raise
 
     def initialize(self):
         """Initialize database tables if they don't exist"""
@@ -110,6 +120,7 @@ class DatabaseService:
             );
         """)
         self.conn.commit()
+        self.add_necessary_indexes()
 
     async def get_points(self, user_id: str) -> float:
         """
@@ -338,22 +349,38 @@ class DatabaseService:
             db_operation
         )
 
-    async def backup_database(self, backup_path: str) -> None:
-        """Create a backup of the database"""
+    async def backup_database(self, backup_path: str, is_pre_cleanup: bool = False) -> None:
+        """Create a backup of the database with essential safety measures.
+        Args:
+            backup_path: The target path for the backup file
+            is_pre_cleanup: If True, this is a pre-cleanup backup
+        """
         def db_operation():
             try:
-                # Ensure the backup directory exists with proper permissions
                 backup_dir = os.path.dirname(backup_path)
                 os.makedirs(backup_dir, mode=0o700, exist_ok=True)
-                
-                # Create backup with proper permissions
+            
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                if is_pre_cleanup:
+                    final_path = os.path.join(backup_dir, f'pre_cleanup_{timestamp}.db')
+                else:
+                    final_path = os.path.join(backup_dir, f'daily_{timestamp}.db')
+
+                # Create WAL checkpoint to ensure data consistency
+                with sqlite3.connect(self.db_path) as checkpoint_conn:
+                    checkpoint_conn.execute('PRAGMA wal_checkpoint(FULL)')
+            
+                # Create backup with secure permissions
                 with sqlite3.connect(self.db_path) as conn:
-                    with open(backup_path, 'wb', opener=lambda p,f: os.open(p, f, 0o600)) as f:
+                    with open(final_path, 'wb', opener=lambda p,f: os.open(p, f, 0o600)) as f:
                         for line in conn.iterdump():
-                            f.write(f'{line}\n'.encode())
-                        
+                            f.write(f'{line}\n'.encode('utf-8'))
+            
+                logging.info(f"{'Pre-cleanup' if is_pre_cleanup else 'Daily'} backup completed: {final_path}")
+                    
             except Exception as e:
-                logging.error(f"Backup failed: {str(e)}")
+                error_msg = f"Backup failed: {str(e)}"
+                logging.error(error_msg)
                 raise
 
         await asyncio.get_event_loop().run_in_executor(
@@ -814,10 +841,204 @@ class DatabaseService:
             
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
+    def add_necessary_indexes(self):
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_confetti_claims_claimed_at 
+                    ON confetti_claims(claimed_at)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_confetti_trap_claims_claimed_at 
+                    ON confetti_trap_claims(claimed_at)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_user_points_last_updated 
+                    ON user_points(last_updated)
+                """)
+
+                conn.commit()
+                logging.info("Successfully added database indexes")
+        except Exception as e:
+            logging.error(f"Error adding indexes: {str(e)}")
+            raise
+
+    async def cleanup_old_records(self):
+        try:
+
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            await self.backup_database(
+                os.path.join('./backup', f'points_{timestamp}.db'),
+                is_pre_cleanup=True
+            )
+        
+            def db_operation():
+                conn = None 
+                cursor = None
+                try:
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                
+                    try:
+
+                        cursor.execute("BEGIN IMMEDIATE TRANSACTION")
+                    
+
+                        cleanup_operations = [
+                            ("vote_records", """
+                                DELETE FROM vote_records 
+                                WHERE vote_id IN (
+                                    SELECT vote_id 
+                                    FROM votes 
+                                    WHERE (is_active = FALSE OR datetime('now') > datetime(expires_at))
+                                    AND datetime(expires_at) < datetime('now', '-14 days')
+                                )
+                            """),
+                            ("vote_options", """
+                                DELETE FROM vote_options
+                                WHERE vote_id IN (
+                                    SELECT vote_id 
+                                    FROM votes 
+                                    WHERE (is_active = FALSE OR datetime('now') > datetime(expires_at))
+                                    AND datetime(expires_at) < datetime('now', '-14 days')
+                                )
+                            """),
+                            ("votes", """
+                                UPDATE votes 
+                                SET is_active = FALSE 
+                                WHERE datetime('now') > datetime(expires_at)
+                                AND is_active = TRUE
+                            """),
+                            ("confetti_claims", """
+                                DELETE FROM confetti_claims 
+                                WHERE datetime(claimed_at) < datetime('now', '-7 days')
+                            """)
+                        ]
+                    
+
+                        for table, sql in cleanup_operations:
+                            try:
+                                cursor.execute(sql)
+                                affected_rows = cursor.rowcount
+                                logging.info(f"Cleaned {affected_rows} rows from {table}")
+                            except Exception as e:
+                                logging.error(f"Error cleaning {table}: {e}")
+                                raise
+                    
+
+                        cursor.execute("COMMIT")
+                        logging.info("Database cleanup transaction committed successfully")
+                    
+
+                        try:
+                            cursor.execute("VACUUM")
+                            logging.info("Database vacuum completed")
+                        except Exception as e:
+                            logging.warning(f"Vacuum failed (non-critical): {e}")
+
+                        
+                    except Exception as e:
+                        if cursor:
+                            cursor.execute("ROLLBACK")
+                        logging.error(f"Error during cleanup transaction: {e}")
+                        raise
+                    
+                except Exception as e:
+                    logging.error(f"Critical error during cleanup: {e}")
+                    raise
+                
+                finally:
+                    if cursor:
+                        cursor.close()
+                    if conn:
+                        conn.close()
+
+
+            await asyncio.get_event_loop().run_in_executor(
+                self.pool,
+                db_operation
+            )
+
+        except Exception as e:
+            logging.error(f"Failed to perform cleanup: {e}")
+
+            return False
+    
+        return True
+
+
+    async def cleanup_old_backups(self, keep_days=14):
+        def db_operation():
+            backup_dir = './backup'
+            os.makedirs(backup_dir, exist_ok=True)
+            current_time = datetime.now()
+        
+            for filename in os.listdir(backup_dir):
+                if filename.startswith('points_') and filename.endswith('.db'):
+                    try:
+
+                        timestamp_str = filename[7:-3]  
+                        file_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                    
+                        if (current_time - file_time).days > keep_days:
+                            os.remove(os.path.join(backup_dir, filename))
+                            logging.info(f"Removed old backup: {filename}")
+                    except Exception as e:
+                        logging.error(f"Error cleaning backup {filename}: {e}")
+
+        await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+
+
+    @tasks.loop(hours=24)
+    async def schedule_cleanup(self):
+        max_retries = 3
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                success_records = await self.cleanup_old_records()
+
+                try:
+                    await self.cleanup_old_backups(keep_days=14)
+                except Exception as e:
+                    logging.error(f"Backup cleanup failed: {e}")
+
+                if success_records:
+                    logging.info("Scheduled cleanup completed successfully")
+                    break
+                else:
+                    retry_count += 1
+                    wait_time = 2 ** retry_count
+                    logging.warning(f"Cleanup attempt {retry_count} failed, retrying in {wait_time} seconds")
+                    await asyncio.sleep(wait_time)
+                
+            except sqlite3.OperationalError as e:
+                retry_count += 1
+                wait_time = 2 ** retry_count
+                logging.warning(f"Database locked, retry {retry_count} in {wait_time} seconds: {str(e)}")
+                if retry_count == max_retries:
+                    logging.error(f"Cleanup failed after {max_retries} attempts")
+                    break
+                await asyncio.sleep(wait_time)
+            
+            except Exception as e:
+                logging.error(f"Unhandled error during cleanup: {str(e)}")
+                break
+
+        if retry_count == max_retries:
+            logging.critical("All cleanup attempts failed. Manual intervention may be required.")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+
+        if hasattr(self, 'schedule_cleanup'):
+            self.schedule_cleanup.cancel()
+        self.pool.shutdown(wait=True)
+        self.conn.close()
+
 
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.pool.shutdown(wait=True)
-        self.conn.close()
