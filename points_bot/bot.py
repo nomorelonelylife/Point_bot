@@ -1322,7 +1322,7 @@ class VoteView(discord.ui.View):
         for option in options:
             button = discord.ui.Button(
                 label=f"{option['option_text']} ({option['points']} points)",
-                custom_id=f"vote_{option['option_id']}",
+                custom_id=f"vote_{option['index']}",
                 style=discord.ButtonStyle.primary,
                 row=option['index'] // 5  
             )
