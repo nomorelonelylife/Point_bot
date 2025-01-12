@@ -640,7 +640,7 @@ class DatabaseService:
             try:
                 cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
             
-                # Get trap details
+                # Get trap details and check validity
                 trap = cursor.execute("""
                     SELECT max_claims, claimed_count 
                     FROM confetti_traps 
@@ -649,7 +649,7 @@ class DatabaseService:
             
                 if not trap:
                     cursor.execute("ROLLBACK")
-                    return False, 0
+                    return False, 0, None, None
             
                 max_claims, claimed_count = trap
             
@@ -661,11 +661,11 @@ class DatabaseService:
             
                 if already_claimed:
                     cursor.execute("ROLLBACK")
-                    return False, 0
+                    return False, 0, None, None
             
                 if claimed_count >= max_claims:
                     cursor.execute("ROLLBACK")
-                    return False, 0
+                    return False, 0, None, None
 
                 # Get user's current points
                 user_points = cursor.execute("""
@@ -674,7 +674,7 @@ class DatabaseService:
             
                 if not user_points or user_points[0] <= 0:
                     cursor.execute("ROLLBACK")
-                    return False, 0
+                    return False, 0, None, None
 
                 # Calculate random points to steal (between 0.1% and 5% of user's points)
                 current_points = float(user_points[0])
@@ -684,7 +684,62 @@ class DatabaseService:
             
                 if points_to_steal <= 0:
                     cursor.execute("ROLLBACK")
-                    return False, 0
+                    return False, 0, None, None
+
+
+                # Get creator's current total trap earnings
+                trap_earnings = cursor.execute("""
+                    SELECT COALESCE(SUM(points_lost), 0) 
+                    FROM confetti_trap_claims 
+                    WHERE trap_id = ?
+                """, (trap_id,)).fetchone()[0]
+
+                # Get creator's current balance
+                creator_balance = cursor.execute("""
+                    SELECT points FROM user_points WHERE user_id = ?
+                """, (creator_id,)).fetchone()
+
+                creator_balance = float(creator_balance[0]) if creator_balance else 0
+                total_earnings = float(trap_earnings) + points_to_steal
+
+                # If creator has no balance or very small balance (less than 0.00000001)
+                if creator_balance < 0.00000001:
+                    # Deactivate the trap immediately
+                    cursor.execute("""
+                        UPDATE confetti_traps 
+                        SET is_active = FALSE
+                        WHERE trap_id = ?
+                    """, (trap_id,))
+                    conn.commit()
+                    return False, 0, "NO_BALANCE", 0
+                
+
+                # Check if earnings exceed 2.33333 times the creator's original balance
+                if total_earnings > creator_balance * 2.33333:
+                    # Calculate penalty (0.01% to 3% of current balance)
+                    penalty_percentage = random.uniform(0.0001, 0.03)
+                    penalty = round(creator_balance * penalty_percentage, 8)
+                
+                    # Ensure penalty doesn't exceed available balance
+                    penalty = min(penalty, creator_balance)
+                
+                    if penalty > 0:  # Only apply penalty if there's something to take
+                        # Penalize creator
+                        cursor.execute("""
+                            UPDATE user_points 
+                            SET points = ROUND(points - ?, 8)
+                            WHERE user_id = ?
+                        """, (penalty, creator_id))
+                    # Deactivate the trap
+                    cursor.execute("""
+                        UPDATE confetti_traps 
+                        SET is_active = FALSE
+                        WHERE trap_id = ?
+                    """, (trap_id,))
+
+                    conn.commit()
+                    return False, 0, "PENALTY", penalty
+                
 
                 # Record the trap claim
                 claim_id = f"{trap_id}_{user_id}"
@@ -718,12 +773,12 @@ class DatabaseService:
                 """, (points_to_steal, creator_id))
             
                 conn.commit()
-                return True, points_to_steal
+                return True, points_to_steal, None, None
             
             except Exception as e:
                 cursor.execute("ROLLBACK")
                 logging.error(f"Error claiming confetti trap: {str(e)}")
-                return False, 0
+                return False, 0, None, None
             finally:
                 conn.close()
 

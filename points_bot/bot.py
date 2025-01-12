@@ -29,6 +29,29 @@ class ErrorLogger:
             'context': context
         })
 
+
+def handle_command_exceptions(func):
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except (ValueError, TypeError, OverflowError) as e:
+            interaction = args[0] if args else None
+            if interaction and hasattr(interaction, 'response'):
+                await interaction.response.send_message(
+                    f"Invalid input: {str(e)}",
+                    ephemeral=True
+                )
+        except Exception as e:
+            interaction = args[0] if args else None
+            if interaction and hasattr(interaction, 'response'):
+                await interaction.response.send_message(
+                    "An unexpected error occurred. Please try again.",
+                    ephemeral=True
+                )
+            logging.error(f"Command error: {str(e)}")
+    return wrapper
+
+
 class PointsBot(discord.Client):
     def __init__(
         self, 
@@ -206,6 +229,7 @@ class PointsBot(discord.Client):
             message="Optional message to display (max 140 characters)",
             expires_in="Expiration time in seconds (optional, random if not set)"
         )
+        @handle_command_exceptions
         async def confetti(
             interaction: discord.Interaction,
             total_points: float,
@@ -214,10 +238,23 @@ class PointsBot(discord.Client):
             expires_in: Optional[int] = None
         ):
             try:
-                # Validate inputs
+
+                if not isinstance(total_points, (int, float)) or math.isnan(total_points) or math.isinf(total_points):
+                    await interaction.response.send_message(
+                        "Please enter a valid number for points",
+                        ephemeral=True
+                    )
+                    return
+                
                 if total_points < 0.00000001:
                     await interaction.response.send_message(
                         "Minimum total points is 0.00000001",
+                        ephemeral=True
+                    )
+                    return
+                if not isinstance(total_points, (int, float)) or total_points > 1000000000:
+                    await interaction.response.send_message(
+                        "Invalid points amount. Please enter a valid number less than 1 billion.",
                         ephemeral=True
                     )
                     return
@@ -237,8 +274,9 @@ class PointsBot(discord.Client):
                     return
 
                 total_points = round(total_points, 8)
-        
+
                 user_points = await self.db.get_points(str(interaction.user.id))
+        
                 if user_points < total_points:
                     await interaction.response.send_message(
                         "You don't have enough points",
@@ -255,15 +293,23 @@ class PointsBot(discord.Client):
                             ephemeral=True
                         )
                         return
-                    expires_at = datetime.now() + timedelta(seconds=expires_in)
+                  #  expires_at = datetime.now() + timedelta(seconds=expires_in)
 
-                ball_id = f"ball_{int(time.time())}_{interaction.user.id}"
 
-        
-                if not message:
+                if message:
+                    message = ''.join(char for char in message if unicodedata.category(char)[0] != 'C')
+                    message = message.strip()
+                    if not message or len(message.encode('utf-8')) > 140:
+                        await interaction.response.send_message(
+                            "Message must be between 1 and 140 bytes when encoded in UTF-8",
+                            ephemeral=True
+                        )
+                        return
+                else:
                     message = "I prepared a confetti ball, LET's Loot!!!!"
-                elif len(message) > 140:
-                    message = message[:140]
+                
+                ball_id = f"ball_{int(time.time())}_{interaction.user.id}"
+                expires_at = None if expires_in is None else datetime.now() + timedelta(seconds=expires_in)
                 
                 await self.db.create_confetti_ball(
                     ball_id=ball_id,
@@ -370,13 +416,27 @@ class PointsBot(discord.Client):
             user="User to tip points to",
             amount="Amount of points to tip (can be decimal, up to 8 decimal places)"
         )
+        @handle_command_exceptions
         async def tip(
             interaction: discord.Interaction,
             user: discord.User,
             amount: float
         ):
             try:
+                
+                if not isinstance(amount, (int, float)) or math.isnan(amount) or math.isinf(amount):
+                    await interaction.response.send_message(
+                        "Please enter a valid number for amount",
+                        ephemeral=True
+                    )
+                    return
                 amount = round(amount, 8)
+                if amount > 1000000000:  
+                    await interaction.response.send_message(
+                        "Amount cannot exceed 1 billion points",
+                        ephemeral=True
+                    )
+                    return
 
                 if amount <= 0:
                     await interaction.response.send_message(
@@ -880,6 +940,7 @@ class PointsBot(discord.Client):
             message="Optional message to display (max 140 characters)",
             expires_in="Expiration time in seconds (optional, random if not set)"
         )
+        @handle_command_exceptions
         async def confettitrap(
             interaction: discord.Interaction,
             max_claims: int,
@@ -887,12 +948,30 @@ class PointsBot(discord.Client):
             expires_in: Optional[int] = None
         ):
             try:
+
+                if message:
+                    message = ''.join(char for char in message if unicodedata.category(char)[0] != 'C')
+                    message = message.strip()
+                    if not message or len(message.encode('utf-8')) > 140:
+                        await interaction.response.send_message(
+                            "Message must be between 1 and 140 bytes when encoded in UTF-8",
+                            ephemeral=True
+                        )
+                        return
+                    
                 if max_claims < 1 or max_claims > 100:
                     await interaction.response.send_message(
                         "Number of claims must be between 1 and 100",
                         ephemeral=True
                     )
                     return
+                if expires_in is not None:
+                    if not isinstance(expires_in, int) or expires_in < 1 or expires_in > 24 * 60 * 60:
+                        await interaction.response.send_message(
+                            "Expiration time must be between 1 second and 24 hours",
+                            ephemeral=True
+                        )
+                        return
 
                 if not interaction.guild:
                     await interaction.response.send_message(
@@ -1374,7 +1453,7 @@ class ConfettiTrapView(discord.ui.View):
                 await interaction.message.edit(view=self)
                 return
 
-            success, points_lost = await self.db.claim_confetti_trap(
+            success, points_lost, penalty_type, penalty_amount = await self.db.claim_confetti_trap(
                 self.trap_id,
                 str(interaction.user.id),
                 self.creator_id
@@ -1402,6 +1481,46 @@ class ConfettiTrapView(discord.ui.View):
                     await interaction.channel.send(
                         f"😈 Confetti trap by {creator_mention} completed! Here's who fell for it:\n{summary}"
                     )
+
+            elif penalty_type in ["PENALTY", "NO_BALANCE"]:
+                button.disabled = True
+                await interaction.message.edit(view=self)
+            
+                creator = interaction.guild.get_member(int(self.creator_id))
+                creator_mention = creator.mention if creator else "Unknown User"
+            
+                # Get all claims for mentioning users
+                claims = await self.db.get_confetti_trap_claims(self.trap_id)
+                mentions = " ".join(
+                    interaction.guild.get_member(int(claim['user_id'])).mention
+                    for claim in claims
+                )
+
+                if penalty_type == "NO_BALANCE":
+                    await interaction.response.send_message(
+                        f"🚫 Trap deactivated! Creator has insufficient balance!",
+                        ephemeral=True
+                    )
+                
+                    if mentions:
+                        await interaction.channel.send(
+                            f"⚠️ Attention {mentions}!\n"
+                            f"The confetti trap by {creator_mention} has been deactivated due to insufficient balance.\n"
+                            f"Your points have been returned!"
+                        )
+                else:  # PENALTY case
+                    await interaction.response.send_message(
+                        f"🚫 Trap exceeded limits! Points returned!\n"
+                        f"{creator_mention} has been penalized {penalty_amount:.8f} points!",
+                        ephemeral=True
+                    )
+                
+                    if mentions:
+                        await interaction.channel.send(
+                            f"⚠️ Attention {mentions}!\n"
+                            f"The confetti trap by {creator_mention} exceeded limits and has been deactivated.\n"
+                            f"Your points have been returned and {creator_mention} has been penalized {penalty_amount:.8f} points!"
+                        )
 
             else:
                 await interaction.response.send_message(
