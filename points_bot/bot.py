@@ -1219,8 +1219,8 @@ class ConfettiView(discord.ui.View):
             if remaining_claims == 1:
                 points = remaining_points
             else:
-                max_claim = remaining_points * 0.9
-                min_claim = remaining_points * 0.01
+                max_claim = min(remaining_points * 0.9, remaining_points / remaining_claims * 2)
+                min_claim = max(remaining_points * 0.01, remaining_points / remaining_claims * 0.5)
                 points = round(random.uniform(min_claim, max_claim), 8)
         
             logging.info(f"Attempting to claim points - Ball ID: {self.ball_id}, User: {interaction.user.id}, Points: {points}")
