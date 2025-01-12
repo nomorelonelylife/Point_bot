@@ -58,6 +58,26 @@ class DatabaseService:
                 FOREIGN KEY(ball_id) REFERENCES confetti_balls(ball_id),
                 UNIQUE(ball_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS confetti_traps (
+                trap_id TEXT PRIMARY KEY,
+                creator_id TEXT NOT NULL,
+                max_claims INTEGER NOT NULL,
+                claimed_count INTEGER DEFAULT 0,
+                message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                channel_id TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE
+            );
+
+            CREATE TABLE IF NOT EXISTS confetti_trap_claims (
+                claim_id TEXT PRIMARY KEY,
+                trap_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                points_lost REAL NOT NULL,
+                claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(trap_id) REFERENCES confetti_traps(trap_id),
+                UNIQUE(trap_id, user_id)
+            );
         """)
         self.conn.commit()
 
@@ -428,6 +448,141 @@ class DatabaseService:
                 return [dict(row) for row in rows]
 
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+    
+
+    async def create_confetti_trap(self, trap_id: str, creator_id: str, max_claims: int, message: str, channel_id: str) -> None:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO confetti_traps 
+                    (trap_id, creator_id, max_claims, message, channel_id)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (trap_id, creator_id, max_claims, message, channel_id))
+                conn.commit()
+
+        await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def get_confetti_trap(self, trap_id: str) -> Optional[Dict]:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT * FROM confetti_traps 
+                    WHERE trap_id = ? AND is_active = TRUE
+                """, (trap_id,)).fetchone()
+                return dict(row) if row else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def claim_confetti_trap(self, trap_id: str, user_id: str, creator_id: str) -> Tuple[bool, float]:
+        def db_operation():
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
+            
+                # Get trap details
+                trap = cursor.execute("""
+                    SELECT max_claims, claimed_count 
+                    FROM confetti_traps 
+                    WHERE trap_id = ? AND is_active = TRUE
+                """, (trap_id,)).fetchone()
+            
+                if not trap:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+            
+                max_claims, claimed_count = trap
+            
+                # Check if user already claimed
+                already_claimed = cursor.execute("""
+                    SELECT 1 FROM confetti_trap_claims 
+                    WHERE trap_id = ? AND user_id = ?
+                """, (trap_id, user_id)).fetchone()
+            
+                if already_claimed:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+            
+                if claimed_count >= max_claims:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+
+                # Get user's current points
+                user_points = cursor.execute("""
+                    SELECT points FROM user_points WHERE user_id = ?
+                """, (user_id,)).fetchone()
+            
+                if not user_points or user_points[0] <= 0:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+
+                # Calculate points to steal (4% or trap limit, whichever is lower)
+                current_points = float(user_points[0])
+                points_to_steal = min(current_points * 0.04, current_points)
+                points_to_steal = round(points_to_steal, 8)
+            
+                if points_to_steal <= 0:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+
+                # Record the trap claim
+                claim_id = f"{trap_id}_{user_id}"
+                cursor.execute("""
+                    INSERT INTO confetti_trap_claims (claim_id, trap_id, user_id, points_lost)
+                    VALUES (?, ?, ?, ROUND(?, 8))
+                """, (claim_id, trap_id, user_id, points_to_steal))
+            
+                # Update trap claimed count
+                cursor.execute("""
+                    UPDATE confetti_traps 
+                    SET claimed_count = claimed_count + 1,
+                        is_active = CASE 
+                            WHEN claimed_count + 1 >= max_claims THEN FALSE 
+                            ELSE TRUE 
+                        END
+                    WHERE trap_id = ?
+                """, (trap_id,))
+            
+                # Transfer points from victim to creator
+                cursor.execute("""
+                    UPDATE user_points 
+                    SET points = ROUND(points - ?, 8)
+                    WHERE user_id = ?
+                """, (points_to_steal, user_id))
+            
+                cursor.execute("""
+                    UPDATE user_points 
+                    SET points = ROUND(points + ?, 8)
+                    WHERE user_id = ?
+                """, (points_to_steal, creator_id))
+            
+                conn.commit()
+                return True, points_to_steal
+            
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                logging.error(f"Error claiming confetti trap: {str(e)}")
+                return False, 0
+            finally:
+                conn.close()
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def get_confetti_trap_claims(self, trap_id: str) -> List[Dict]:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT user_id, points_lost, claimed_at
+                    FROM confetti_trap_claims
+                    WHERE trap_id = ?
+                    ORDER BY points_lost DESC
+                """, (trap_id,)).fetchall()
+                return [dict(row) for row in rows]
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
 
     def __enter__(self):
         return self

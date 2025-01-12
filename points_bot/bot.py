@@ -1,20 +1,20 @@
 import discord
-from discord import app_commands
-from discord.ext import tasks
-from typing import Optional, List, Dict
 import re
 import logging
 import random
 import csv
-from collections import deque
 import asyncio
 import os
 import shutil
 import aiohttp
 import time
+from discord import app_commands
+from discord.ext import tasks
+from typing import Optional, Tuple, List, Dict
 from datetime import datetime, timedelta
 from .database import DatabaseService
 from .twitter_service import TwitterService
+from collections import deque
 
 class ErrorLogger:
     def __init__(self, max_logs=30):
@@ -712,6 +712,69 @@ class PointsBot(discord.Client):
                 )
 
         
+
+        @self.tree.command(name="confettitrap", description="Create a confetti trap")
+        @app_commands.describe(
+            max_claims="Maximum number of users who can fall for the trap (min: 1, max: 100)",
+            message="Optional message to display (max 140 characters)"
+        )
+        async def confettitrap(
+            interaction: discord.Interaction,
+            max_claims: int,
+            message: Optional[str] = None
+        ):
+            try:
+                if max_claims < 1 or max_claims > 100:
+                    await interaction.response.send_message(
+                        "Number of claims must be between 1 and 100",
+                        ephemeral=True
+                    )
+                    return
+
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        "This command can only be used in a server",
+                        ephemeral=True
+                    )
+                    return
+
+                trap_id = f"trap_{int(time.time())}_{interaction.user.id}"
+        
+                if not message:
+                    message = "I prepared a confetti drop, LET's Loot!!!!"
+                elif len(message) > 140:
+                    message = message[:140]
+
+                await self.db.create_confetti_trap(
+                    trap_id=trap_id,
+                    creator_id=str(interaction.user.id),
+                    max_claims=max_claims,
+                    message=message,
+                    channel_id=str(interaction.channel_id)
+                )
+
+                view = ConfettiTrapView(
+                    self.db,
+                    trap_id,
+                    str(interaction.user.id),
+                    max_claims
+                ) 
+                await interaction.response.send_message(
+                    f"🎊 {interaction.user.mention} says: {message}\n"
+                    f"Quick! {max_claims} lucky users can claim points from this confetti!",
+                    view=view
+                )
+
+            except Exception as e:
+                logging.error(f"Error in confetti trap command: {str(e)}")
+                await interaction.response.send_message(
+                    "An error occurred while creating the confetti trap",
+                    ephemeral=True
+                )
+
+
+
+
         @self.tree.command(name="rolemembers", description="Export members with a specific role to CSV")
         @app_commands.checks.has_permissions(administrator=True)
         @app_commands.describe(role="The role to export members of")
@@ -1038,5 +1101,78 @@ class ConfettiView(discord.ui.View):
             print(error_msg)  
             await interaction.response.send_message(
                 "An unexpected error occurred. Please try again or contact an administrator.",
+                ephemeral=True
+            )
+
+
+
+class ConfettiTrapView(discord.ui.View):
+    def __init__(self, db: DatabaseService, trap_id: str, creator_id: str, max_claims: int):
+        super().__init__(timeout=None)
+        self.db = db
+        self.trap_id = trap_id
+        self.creator_id = creator_id
+        self.max_claims = max_claims
+
+    @discord.ui.button(
+        label="🎊 Grab Points! 🎊", 
+        style=discord.ButtonStyle.success,
+        custom_id="confetti_trap_claim"
+    )
+    async def claim_button(
+        self, 
+        interaction: discord.Interaction, 
+        button: discord.ui.Button
+    ):
+        try:
+            trap = await self.db.get_confetti_trap(self.trap_id)
+            if not trap:
+                await interaction.response.send_message(
+                    "This confetti trap is no longer active!",
+                    ephemeral=True
+                )
+                button.disabled = True
+                await interaction.message.edit(view=self)
+                return
+
+            success, points_lost = await self.db.claim_confetti_trap(
+                self.trap_id,
+                str(interaction.user.id),
+                self.creator_id
+            )
+
+            if success:
+                await interaction.response.send_message(
+                    f"😈 Oh no! You fell for the trap! Lost {points_lost:.8f} points!",
+                    ephemeral=True
+                )
+                
+                trap = await self.db.get_confetti_trap(self.trap_id)
+                if not trap or trap['claimed_count'] >= trap['max_claims']:
+                    button.disabled = True
+                    await interaction.message.edit(view=self)
+                    
+                    claims = await self.db.get_confetti_trap_claims(self.trap_id)
+                    summary = "\n".join(
+                        f"{interaction.guild.get_member(int(claim['user_id'])).mention}: {claim['points_lost']:.8f} points"
+                        for claim in claims
+                    )
+                    
+                    creator = interaction.guild.get_member(int(self.creator_id))
+                    creator_mention = creator.mention if creator else "Unknown User"
+                    await interaction.channel.send(
+                        f"😈 Confetti trap by {creator_mention} completed! Here's who fell for it:\n{summary}"
+                    )
+
+            else:
+                await interaction.response.send_message(
+                    "You've already interacted with this confetti!",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            logging.error(f"Error in confetti trap claim: {str(e)}")
+            await interaction.response.send_message(
+                "An error occurred while processing your claim.",
                 ephemeral=True
             )
