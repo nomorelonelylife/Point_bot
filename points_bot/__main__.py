@@ -71,8 +71,8 @@ async def main():
             database_service=db
         )
         
-        print("Running bot...")
-        logging.info("Running bot...")
+        print("Running bot via discord token...")
+        logging.info("Running bot via discord token...")
         await bot.start(os.getenv('DISCORD_TOKEN'))
 
     except Exception as e:

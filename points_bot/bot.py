@@ -63,13 +63,15 @@ class PointsBot(discord.Client):
         return None
 
     async def start(self, token):
+        """
+        Asynchronously start the bot
+
+        Args:
+            token (str): Discord bot token
+        """
         try:
-            print("Registering commands...")
-            logging.info("Registering commands...")
-        
-        
-            print("Starting bot...")
-            logging.info("Starting bot...")
+            print("Starting bot with start method...")
+            logging.info("Starting bot with start method...")
         
             self.check_tweets.start()
             self.backup_database.start()
@@ -1134,7 +1136,7 @@ class PointsBot(discord.Client):
 
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
-        print('------')
+        print('----------------------------------------------')
     
         try:
             print("Registering commands...")
