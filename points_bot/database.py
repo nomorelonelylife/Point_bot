@@ -79,6 +79,35 @@ class DatabaseService:
                 FOREIGN KEY(trap_id) REFERENCES confetti_traps(trap_id),
                 UNIQUE(trap_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS votes (
+                vote_id TEXT PRIMARY KEY,
+                creator_id TEXT NOT NULL,              
+                target_user_id TEXT NOT NULL,          
+                description TEXT NOT NULL,             
+                expires_at TIMESTAMP NOT NULL,         
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE         
+            );
+
+            CREATE TABLE IF NOT EXISTS vote_options (
+                option_id TEXT PRIMARY KEY,
+                vote_id TEXT NOT NULL,                
+                option_text TEXT NOT NULL,             
+                points REAL NOT NULL,                  
+                votes_count INTEGER DEFAULT 0,        
+                FOREIGN KEY(vote_id) REFERENCES votes(vote_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS vote_records (
+                record_id TEXT PRIMARY KEY,
+                vote_id TEXT NOT NULL,                 
+                option_id TEXT NOT NULL,               
+                voter_id TEXT NOT NULL,                
+                voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(vote_id) REFERENCES votes(vote_id),
+                FOREIGN KEY(option_id) REFERENCES vote_options(option_id),
+                UNIQUE(vote_id, voter_id)             
+            );
         """)
         self.conn.commit()
 
@@ -583,6 +612,183 @@ class DatabaseService:
                 """, (trap_id,)).fetchall()
                 return [dict(row) for row in rows]
 
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+    
+    async def create_vote(
+        self, 
+        vote_id: str,
+        creator_id: str,
+        target_user_id: str,
+        description: str,
+        options: List[Dict[str, any]],
+        expires_in_days: int = 7
+    ) -> None:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
+                
+                    expires_at = datetime.now() + timedelta(days=expires_in_days)
+                
+                    cursor.execute("""
+                        INSERT INTO votes 
+                        (vote_id, creator_id, target_user_id, description, expires_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (vote_id, creator_id, target_user_id, description, expires_at))
+                
+                    for option in options:
+                        option_id = f"{vote_id}_{option['index']}"
+                        cursor.execute("""
+                            INSERT INTO vote_options 
+                            (option_id, vote_id, option_text, points)
+                            VALUES (?, ?, ?, ROUND(?, 8))
+                        """, (option_id, vote_id, option['text'], option['points']))
+                
+                    conn.commit()
+                except Exception as e:
+                    cursor.execute("ROLLBACK")
+                    raise e
+
+        await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def get_vote(self, vote_id: str) -> Optional[Dict]:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+            
+                vote = conn.execute("""
+                    SELECT * FROM votes 
+                    WHERE vote_id = ? 
+                    AND is_active = TRUE
+                    AND datetime('now') < datetime(expires_at)
+                """, (vote_id,)).fetchone()
+            
+                if not vote:
+                    return None
+                
+                options = conn.execute("""
+                    SELECT * FROM vote_options
+                    WHERE vote_id = ?
+                    ORDER BY option_id
+                """, (vote_id,)).fetchall()
+            
+                vote_dict = dict(vote)
+                vote_dict['options'] = [dict(opt) for opt in options]
+                return vote_dict
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def record_vote(
+        self,
+        vote_id: str,
+        option_id: str,
+        voter_id: str
+    ) -> Tuple[bool, float]:
+
+        def db_operation():
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
+            
+
+                vote = cursor.execute("""
+                    SELECT target_user_id FROM votes
+                    WHERE vote_id = ? 
+                    AND is_active = TRUE
+                    AND datetime('now') < datetime(expires_at)
+                """, (vote_id,)).fetchone()
+            
+                if not vote:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+                
+
+                existing_vote = cursor.execute("""
+                    SELECT 1 FROM vote_records
+                    WHERE vote_id = ? AND voter_id = ?
+                """, (vote_id, voter_id)).fetchone()
+            
+                if existing_vote:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+                
+
+                option = cursor.execute("""
+                    SELECT points FROM vote_options
+                    WHERE option_id = ? AND vote_id = ?
+                """, (option_id, vote_id)).fetchone()
+            
+                if not option:
+                    cursor.execute("ROLLBACK")
+                    return False, 0
+                
+                points = float(option[0])
+            
+
+                record_id = f"{vote_id}_{voter_id}"
+                cursor.execute("""
+                    INSERT INTO vote_records (record_id, vote_id, option_id, voter_id)
+                    VALUES (?, ?, ?, ?)
+                """, (record_id, vote_id, option_id, voter_id))
+            
+
+                cursor.execute("""
+                    UPDATE vote_options
+                    SET votes_count = votes_count + 1
+                    WHERE option_id = ?
+                """, (option_id,))
+            
+
+                cursor.execute("""
+                    INSERT INTO user_points (user_id, username, points)
+                    VALUES (?, 'Unknown', ROUND(?, 8))
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        points = ROUND(points + ?, 8),
+                        last_updated = CURRENT_TIMESTAMP
+                """, (vote[0], points, points))
+            
+                conn.commit()
+                return True, points
+            
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                raise e
+            finally:
+                conn.close()
+            
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def get_vote_results(self, vote_id: str) -> Optional[Dict]:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+            
+                vote = conn.execute("""
+                    SELECT v.*, 
+                           COUNT(DISTINCT vr.voter_id) as total_votes,
+                           SUM(vo.points * vo.votes_count) as total_points_awarded
+                    FROM votes v
+                    LEFT JOIN vote_records vr ON v.vote_id = vr.vote_id
+                    LEFT JOIN vote_options vo ON v.vote_id = vo.vote_id
+                    WHERE v.vote_id = ?
+                    GROUP BY v.vote_id
+                """, (vote_id,)).fetchone()
+            
+                if not vote:
+                    return None
+                
+                options = conn.execute("""
+                    SELECT * FROM vote_options
+                    WHERE vote_id = ?
+                    ORDER BY votes_count DESC
+                """, (vote_id,)).fetchall()
+            
+                result = dict(vote)
+                result['options'] = [dict(opt) for opt in options]
+                return result
+            
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
 

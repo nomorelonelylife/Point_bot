@@ -589,6 +589,139 @@ class PointsBot(discord.Client):
                 )
 
 
+        @self.tree.command(name="createvote", description="Create a vote (Admin only)")
+        @app_commands.checks.has_permissions(administrator=True)
+        @app_commands.describe(
+            user="User who will receive the points",
+            description="Vote description/topic",
+            expires_in="Days until vote expires (default: 7)",
+            option1="Option 1 format: text|points",
+            option2="Option 2 format: text|points",
+            option3="Option 3 format: text|points (optional)",
+            option4="Option 4 format: text|points (optional)",
+            option5="Option 5 format: text|points (optional)"
+        )
+        async def createvote(
+            interaction: discord.Interaction,
+            user: discord.User,
+            description: str,
+            expires_in: Optional[int] = 7,
+            option1: str,
+            option2: str,
+            option3: Optional[str] = None,
+            option4: Optional[str] = None,
+            option5: Optional[str] = None,
+            option6: Optional[str] = None,
+            option7: Optional[str] = None,
+            option8: Optional[str] = None,
+            option9: Optional[str] = None,
+            option10: Optional[str] = None
+        ):
+            try:
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        "This command can only be used in a server",
+                        ephemeral=True
+                    )
+                    return
+            
+                # Validate expiration
+                if expires_in < 1 or expires_in > 30:
+                    await interaction.response.send_message(
+                        "Vote duration must be between 1 and 30 days",
+                        ephemeral=True
+                    )
+                    return
+            
+                # Process options
+                options = []
+                for i, opt in enumerate([option1, option2, option3, option4, option5,
+                                       option6, option7, option8, option9, option10]):
+                    if opt:
+                        try:
+                            text, points = opt.split('|')
+                            points = float(points)
+                            if points <= 0:
+                                await interaction.response.send_message(
+                                    f"Points must be positive for option {i+1}",
+                                    ephemeral=True
+                                )
+                                return
+                                # 移到这里，在检查 points <= 0 之后
+                            options.append({
+                                'index': i,
+                                'text': text.strip(),
+                                'points': round(points, 8)
+                            })
+                        except ValueError:
+                            await interaction.response.send_message(
+                                f"Invalid format for option {i+1}. Use 'text|points'",
+                                ephemeral=True
+                            )
+                            return
+                    
+                if len(options) < 2:
+                    await interaction.response.send_message(
+                        "You must provide at least 2 options",
+                        ephemeral=True
+                    )
+                    return
+            
+                # Defer response as the next operations might take some time
+                await interaction.response.defer()
+            
+                # Create vote
+                vote_id = f"vote_{int(time.time())}_{interaction.user.id}"
+                await self.db.create_vote(
+                    vote_id=vote_id,
+                    creator_id=str(interaction.user.id),
+                    target_user_id=str(user.id),
+                    description=description,
+                    options=options,
+                    expires_in_days=expires_in
+                )
+        
+                # Create options text
+                options_text = "\n".join(
+                    f"{i+1}. {opt['text']} ({opt['points']:.8f} points)"
+                    for i, opt in enumerate(options)
+                )
+        
+                # Create vote message
+                message = (
+                    f"🗳️ **New Vote** by {interaction.user.mention}\n\n"
+                    f"**For**: {user.mention}\n"
+                    f"**Topic**: {description}\n\n"
+                    f"**Options**:\n{options_text}\n\n"
+                    f"**Expires in**: {expires_in} days\n"
+                    f"Current votes: 0\n"
+                    f"Total points awarded: 0"
+                )
+        
+                # Create and setup vote view
+                view = VoteView(self.db, vote_id)
+                await view.create_buttons(options)
+        
+                # Send vote message
+                await interaction.followup.send(message, view=view)
+        
+            except Exception as e:
+                logging.error(f"Create vote error: {str(e)}")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "An error occurred while creating the vote. Please try again later.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "An error occurred while creating the vote. Please try again later.",
+                        ephemeral=True
+                    )
+
+
+
+
+
         @self.tree.command(name="exportbackup", description="Export a backup database file (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
         async def exportbackup(
@@ -1107,6 +1240,7 @@ class ConfettiView(discord.ui.View):
 
 
 class ConfettiTrapView(discord.ui.View):
+
     def __init__(self, db: DatabaseService, trap_id: str, creator_id: str, max_claims: int):
         super().__init__(timeout=None)
         self.db = db
@@ -1176,3 +1310,75 @@ class ConfettiTrapView(discord.ui.View):
                 "An error occurred while processing your claim.",
                 ephemeral=True
             )
+
+
+class VoteView(discord.ui.View):
+    def __init__(self, db: DatabaseService, vote_id: str):
+        super().__init__(timeout=None)  
+        self.db = db
+        self.vote_id = vote_id
+        
+    async def create_buttons(self, options: List[Dict]):
+
+        for option in options:
+            button = discord.ui.Button(
+                label=f"{option['option_text']} ({option['points']} points)",
+                custom_id=f"vote_{option['option_id']}",
+                style=discord.ButtonStyle.primary,
+                row=option['index'] // 5  
+            )
+            button.callback = self.create_vote_callback(option['option_id'])
+            self.add_item(button)
+            
+    def create_vote_callback(self, option_id: str):
+
+        async def vote_callback(interaction: discord.Interaction):
+            try:
+
+                success, points = await self.db.record_vote(
+                    self.vote_id,
+                    option_id,
+                    str(interaction.user.id)
+                )
+                
+                if success:
+
+                    await interaction.response.send_message(
+                        f"Vote successfully！{points:.8f} points have been awarded!!",
+                        ephemeral=True
+                    )
+                    
+
+                    results = await self.db.get_vote_results(self.vote_id)
+                    if results:
+                        current_votes = results['total_votes']
+                        total_points = results.get('total_points_awarded', 0)
+                        
+
+                        content = interaction.message.content
+                        content = re.sub(
+                            r'Current vote count: \d+',
+                            f'Current vote count: {current_votes}',
+                            content
+                        )
+                        content = re.sub(
+                            r'Total awarded points: [\d.]+',
+                            f'Total awarded points: {total_points:.8f}',
+                            content
+                        )
+                        
+                        await interaction.message.edit(content=content)
+                else:
+                    await interaction.response.send_message(
+                        "You have already cast your vote!",
+                        ephemeral=True
+                    )
+                    
+            except Exception as e:
+                logging.error(f"Vote callback error: {str(e)}")
+                await interaction.response.send_message(
+                    "Voting error. Please try again later.",
+                    ephemeral=True
+                )
+                
+        return vote_callback
