@@ -17,7 +17,7 @@ from .database import DatabaseService
 from .twitter_service import TwitterService
 
 class ErrorLogger:
-    def __init__(self, max_logs=3):
+    def __init__(self, max_logs=30):
         self.errors = deque(maxlen=max_logs)
         
     def log_error(self, error: Exception, context: str):

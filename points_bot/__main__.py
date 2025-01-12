@@ -1,20 +1,29 @@
 import os
 import sys
 import logging
-import threading
+from logging.handlers import RotatingFileHandler
 from typing import List
 from dotenv import load_dotenv
 from .bot import PointsBot
 
 def setup_logging():
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler('bot.log')
-        ]
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    
+    file_handler = RotatingFileHandler(
+        'bot.log',
+        maxBytes=1000*1024,  
+        backupCount=1,      
+        encoding='utf-8'
     )
+    file_handler.setFormatter(formatter)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
 
 def validate_env(required_envs: List[str]) -> None:
     missing = [env for env in required_envs if not os.getenv(env)]
