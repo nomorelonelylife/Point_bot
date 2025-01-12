@@ -62,18 +62,24 @@ class PointsBot(discord.Client):
                 return match.group(1)
         return None
 
-    async def setup_hook(self):
-
+    async def start(self, token):
         try:
-            print("Setup hook started...")
-            logging.info("Setup hook started...")
-
-            print("Setup hook completed.")
-            logging.info("Setup hook completed.")
-
+            print("Registering commands...")
+            logging.info("Registering commands...")
+        
+            await self.register_commands()
+        
+            print("Starting bot...")
+            logging.info("Starting bot...")
+        
+            self.check_tweets.start()
+            self.backup_database.start()
+        
+            await super().start(token)
+    
         except Exception as e:
-            print(f"Error in setup_hook: {e}")
-            logging.error(f"Error in setup_hook: {e}")
+            print(f"Error starting bot: {e}")
+            logging.error(f"Error starting bot: {e}")
             raise
 
     async def register_commands(self):
