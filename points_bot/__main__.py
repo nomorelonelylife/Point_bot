@@ -57,7 +57,7 @@ async def main():
             db_path=os.getenv('DB_PATH', './points.db')
         )
         
-        # 异步初始化数据库
+        # Async initialize database
         await db.async_initialize()
 
         print("Creating bot instance...")
@@ -67,17 +67,26 @@ async def main():
             twitter_token=os.getenv('TWITTER_BEARER_TOKEN'),
             channel_id=os.getenv('SOCIAL_CHANNEL_ID'),
             og_role_id=os.getenv('OG_ROLE_ID'),
-            db_path=os.getenv('DB_PATH')
+            database_service=db
         )
         
         print("Running bot...")
         logging.info("Running bot...")
-        bot.run(os.getenv('DISCORD_TOKEN'))
+        await bot.start(os.getenv('DISCORD_TOKEN'))
 
     except Exception as e:
         logging.critical(f"Fatal error: {str(e)}")
         print(f"Fatal error: {str(e)}")
         sys.exit(1)
 
+def run_bot():
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot stopped by user.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    run_bot()

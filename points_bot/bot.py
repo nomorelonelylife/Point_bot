@@ -63,20 +63,14 @@ class PointsBot(discord.Client):
         return None
 
     async def setup_hook(self):
-        print("Setup hook started...")
-        logging.info("Setup hook started...")
-    
-        try:
 
-            await self.register_commands()
-            print("Commands registered in setup_hook")
-            logging.info("Commands registered in setup_hook")
-        
-            self.check_tweets.start()
-            self.backup_database.start()
-        
-            print("Background tasks started.")
-            logging.info("Background tasks started.")
+        try:
+            print("Setup hook started...")
+            logging.info("Setup hook started...")
+
+            print("Setup hook completed.")
+            logging.info("Setup hook completed.")
+
         except Exception as e:
             print(f"Error in setup_hook: {e}")
             logging.error(f"Error in setup_hook: {e}")
@@ -1113,10 +1107,25 @@ class PointsBot(discord.Client):
     async def before_tasks(self):
         await self.wait_until_ready()
 
+    
     async def close(self):
-        if hasattr(self, 'db'):
-            self.db.__exit__(None, None, None)
-        await super().close()
+        try:
+        
+            if hasattr(self, 'check_tweets'):
+                self.check_tweets.cancel()
+            if hasattr(self, 'backup_database'):
+                self.backup_database.cancel()
+
+            if hasattr(self, 'db'):
+                if hasattr(self.db, 'close'):
+                    await self.db.close()
+                else:
+                    self.db.__exit__(None, None, None)
+
+            await super().close()
+
+        except Exception as e:
+            logging.error(f"Error during bot shutdown: {str(e)}")
 
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
@@ -1247,7 +1256,7 @@ class ConfettiTrapView(discord.ui.View):
         self.trap_id = trap_id
         self.creator_id = creator_id
         self.max_claims = max_claims
-
+ 
     @discord.ui.button(
         label="🎊 Grab Points! 🎊", 
         style=discord.ButtonStyle.success,

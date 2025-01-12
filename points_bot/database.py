@@ -1149,6 +1149,17 @@ class DatabaseService:
         if self.conn:
             self.conn.close()
 
+    async def close(self):
+        if hasattr(self, 'schedule_cleanup'):
+            self.schedule_cleanup.cancel()
+    
+        if self.pool:
+            self.pool.shutdown(wait=True)
+    
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
     def __enter__(self):
         return self
 
