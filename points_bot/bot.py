@@ -10,7 +10,7 @@ import aiohttp
 import time
 from discord import app_commands
 from discord.ext import tasks
-from typing import Optional, List, Dict, Callable, Any, TypeVar, Awaitable, ParamSpec
+from typing import Optional, List, Dict, Callable, Any, TypeVar, Awaitable, Coroutine
 from datetime import datetime, timedelta
 from .database import DatabaseService
 from .twitter_service import TwitterService
@@ -32,11 +32,8 @@ class ErrorLogger:
             'context': context
         })
 
-P = ParamSpec('P')
-R = TypeVar('R')
-
-def handle_command_exceptions(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[None]]:
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
+def handle_command_exceptions(func: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Coroutine[Any, Any, None]]:
+    async def wrapper(*args: Any, **kwargs: Any) -> None:
         try:
             return await func(*args, **kwargs)
         except (ValueError, TypeError, OverflowError) as e:
