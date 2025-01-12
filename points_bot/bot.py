@@ -1320,13 +1320,14 @@ class VoteView(discord.ui.View):
     async def create_buttons(self, options: List[Dict]):
 
         for option in options:
+            option_id = f"{self.vote_id}_{option['index']}"  
             button = discord.ui.Button(
                 label=f"{option['option_text']} ({option['points']} points)",
-                custom_id=f"vote_{option['index']}",
+                custom_id=f"vote_{option_id}",
                 style=discord.ButtonStyle.primary,
                 row=option['index'] // 5  
             )
-            button.callback = self.create_vote_callback(option['option_id'])
+            button.callback = self.create_vote_callback(option_id)
             self.add_item(button)
             
     def create_vote_callback(self, option_id: str):
