@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import asyncio
+import random
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -517,9 +518,10 @@ class DatabaseService:
                     cursor.execute("ROLLBACK")
                     return False, 0
 
-                # Calculate points to steal (4% or trap limit, whichever is lower)
+                # Calculate random points to steal (between 0.1% and 5% of user's points)
                 current_points = float(user_points[0])
-                points_to_steal = min(current_points * 0.04, current_points)
+                steal_percentage = random.uniform(0.001, 0.05)  # Random percentage between 0.1% and 5%
+                points_to_steal = min(current_points * steal_percentage, current_points)
                 points_to_steal = round(points_to_steal, 8)
             
                 if points_to_steal <= 0:
