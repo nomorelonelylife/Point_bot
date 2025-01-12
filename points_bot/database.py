@@ -13,114 +13,180 @@ class DatabaseService:
         try:
             self.db_path = db_path
             self.pool = ThreadPoolExecutor(max_workers=max_connections)
-            self.conn = sqlite3.connect(
-                db_path,
-                timeout=30.0,
-                isolation_level='EXCLUSIVE'
-            )
-            self.conn.execute('PRAGMA journal_mode=WAL')
-            self.conn.row_factory = sqlite3.Row
-            self.initialize()
-            self.schedule_cleanup.start()
+            self.conn = None
+
         except Exception as e:
             logging.critical(f"Database initialization failed: {str(e)}")
             if hasattr(self, 'pool'):
                 self.pool.shutdown(wait=False)
-            if hasattr(self, 'conn'):
-                self.conn.close()
             raise
+    
+    
+    async def async_initialize(self):
+        """
+        Asynchronously initialize the database with comprehensive error handling
+        and setup operations.
+        """
+        def _initialize():
+            try:
+                # Establish database connection
+                conn = sqlite3.connect(
+                    self.db_path,
+                    timeout=30.0,
+                    isolation_level='EXCLUSIVE'
+                )
+                conn.execute('PRAGMA journal_mode=WAL')
+                conn.row_factory = sqlite3.Row
 
+                # Database table initialization scripts
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS user_points (
+                        user_id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        points REAL DEFAULT 0,
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE TABLE IF NOT EXISTS monitored_tweets (
+                        tweet_id TEXT PRIMARY KEY,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        like_points REAL DEFAULT 1,
+                        retweet_points REAL DEFAULT 2,
+                        reply_points REAL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    CREATE TABLE IF NOT EXISTS confetti_balls (
+                        ball_id TEXT PRIMARY KEY,
+                        creator_id TEXT NOT NULL,
+                        total_points REAL NOT NULL,
+                        max_claims INTEGER NOT NULL,
+                        claimed_count INTEGER DEFAULT 0,
+                        message TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        channel_id TEXT NOT NULL,
+                        is_active BOOLEAN DEFAULT TRUE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS confetti_claims (
+                        claim_id TEXT PRIMARY KEY,
+                        ball_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        points_claimed REAL NOT NULL,
+                        claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(ball_id) REFERENCES confetti_balls(ball_id),
+                        UNIQUE(ball_id, user_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS confetti_traps (
+                        trap_id TEXT PRIMARY KEY,
+                        creator_id TEXT NOT NULL,
+                        max_claims INTEGER NOT NULL,
+                        claimed_count INTEGER DEFAULT 0,
+                        message TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        channel_id TEXT NOT NULL,
+                        is_active BOOLEAN DEFAULT TRUE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS confetti_trap_claims (
+                        claim_id TEXT PRIMARY KEY,
+                        trap_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        points_lost REAL NOT NULL,
+                        claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(trap_id) REFERENCES confetti_traps(trap_id),
+                        UNIQUE(trap_id, user_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS votes (
+                        vote_id TEXT PRIMARY KEY,
+                        creator_id TEXT NOT NULL,              
+                        target_user_id TEXT NOT NULL,          
+                        description TEXT NOT NULL,             
+                        expires_at TIMESTAMP NOT NULL,         
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        is_active BOOLEAN DEFAULT TRUE         
+                    );
+
+                    CREATE TABLE IF NOT EXISTS vote_options (
+                        option_id TEXT PRIMARY KEY,
+                        vote_id TEXT NOT NULL,                
+                        option_text TEXT NOT NULL,             
+                        points REAL NOT NULL,                  
+                        votes_count INTEGER DEFAULT 0,        
+                        FOREIGN KEY(vote_id) REFERENCES votes(vote_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS vote_records (
+                        record_id TEXT PRIMARY KEY,
+                        vote_id TEXT NOT NULL,                 
+                        option_id TEXT NOT NULL,               
+                        voter_id TEXT NOT NULL,                
+                        voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(vote_id) REFERENCES votes(vote_id),
+                        FOREIGN KEY(option_id) REFERENCES vote_options(option_id),
+                        UNIQUE(vote_id, voter_id)             
+                    );
+                """)
+
+                # Add indexes
+                conn.executescript("""
+                    CREATE INDEX IF NOT EXISTS idx_confetti_claims_claimed_at 
+                    ON confetti_claims(claimed_at);
+
+                    CREATE INDEX IF NOT EXISTS idx_confetti_trap_claims_claimed_at 
+                    ON confetti_trap_claims(claimed_at);
+
+                    CREATE INDEX IF NOT EXISTS idx_user_points_last_updated 
+                    ON user_points(last_updated);
+                """)
+
+                conn.commit()
+                return conn
+
+            except sqlite3.Error as e:
+                logging.critical(f"SQLite initialization error: {e}")
+                raise
+
+
+        try:
+            # Execute initialization in thread pool
+            self.conn = await asyncio.get_event_loop().run_in_executor(
+                self.pool, 
+                _initialize
+            )
+        
+            logging.info("Database initialized successfully")
+
+            index_result = await self.add_necessary_indexes()
+
+            if not index_result:
+                logging.warning("Some indexes could not be created")
+
+            if hasattr(self, 'schedule_cleanup'):
+                self.schedule_cleanup.start()
+
+                return self.conn
+
+        except Exception as e:
+            logging.critical(f"Async database initialization failed: {e}")
+        
+            # Attempt to close connection if it exists
+            if hasattr(self, 'conn') and self.conn:
+                try:
+                    self.conn.close()
+                except:
+                    pass
+        
+            # Shutdown thread pool
+            if hasattr(self, 'pool'):
+                self.pool.shutdown(wait=False)
+        
+            raise
+    
     def initialize(self):
-        """Initialize database tables if they don't exist"""
-        self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS user_points (
-                user_id TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                points REAL DEFAULT 0,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS monitored_tweets (
-                tweet_id TEXT PRIMARY KEY,
-                is_active BOOLEAN DEFAULT TRUE,
-                like_points REAL DEFAULT 1,
-                retweet_points REAL DEFAULT 2,
-                reply_points REAL DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS confetti_balls (
-                ball_id TEXT PRIMARY KEY,
-                creator_id TEXT NOT NULL,
-                total_points REAL NOT NULL,
-                max_claims INTEGER NOT NULL,
-                claimed_count INTEGER DEFAULT 0,
-                message TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                channel_id TEXT NOT NULL,
-                is_active BOOLEAN DEFAULT TRUE
-            );
-
-            CREATE TABLE IF NOT EXISTS confetti_claims (
-                claim_id TEXT PRIMARY KEY,
-                ball_id TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                points_claimed REAL NOT NULL,
-                claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(ball_id) REFERENCES confetti_balls(ball_id),
-                UNIQUE(ball_id, user_id)
-            );
-            CREATE TABLE IF NOT EXISTS confetti_traps (
-                trap_id TEXT PRIMARY KEY,
-                creator_id TEXT NOT NULL,
-                max_claims INTEGER NOT NULL,
-                claimed_count INTEGER DEFAULT 0,
-                message TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                channel_id TEXT NOT NULL,
-                is_active BOOLEAN DEFAULT TRUE
-            );
-
-            CREATE TABLE IF NOT EXISTS confetti_trap_claims (
-                claim_id TEXT PRIMARY KEY,
-                trap_id TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                points_lost REAL NOT NULL,
-                claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(trap_id) REFERENCES confetti_traps(trap_id),
-                UNIQUE(trap_id, user_id)
-            );
-            CREATE TABLE IF NOT EXISTS votes (
-                vote_id TEXT PRIMARY KEY,
-                creator_id TEXT NOT NULL,              
-                target_user_id TEXT NOT NULL,          
-                description TEXT NOT NULL,             
-                expires_at TIMESTAMP NOT NULL,         
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT TRUE         
-            );
-
-            CREATE TABLE IF NOT EXISTS vote_options (
-                option_id TEXT PRIMARY KEY,
-                vote_id TEXT NOT NULL,                
-                option_text TEXT NOT NULL,             
-                points REAL NOT NULL,                  
-                votes_count INTEGER DEFAULT 0,        
-                FOREIGN KEY(vote_id) REFERENCES votes(vote_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS vote_records (
-                record_id TEXT PRIMARY KEY,
-                vote_id TEXT NOT NULL,                 
-                option_id TEXT NOT NULL,               
-                voter_id TEXT NOT NULL,                
-                voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(vote_id) REFERENCES votes(vote_id),
-                FOREIGN KEY(option_id) REFERENCES vote_options(option_id),
-                UNIQUE(vote_id, voter_id)             
-            );
-        """)
-        self.conn.commit()
-        self.add_necessary_indexes()
+        logging.warning("Synchronous initialization is deprecated. Use async_initialize() instead.")
 
     async def get_points(self, user_id: str) -> float:
         """
@@ -841,29 +907,73 @@ class DatabaseService:
             
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
-    def add_necessary_indexes(self):
-
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-
-                conn.execute("""
+    
+    async def add_necessary_indexes(self):
+        """
+        Asynchronously add necessary indexes to the database
+    
+        Args:
+            conn (sqlite3.Connection, optional): Existing database connection
+        """
+        def _add_indexes():
+            try:
+                
+                if not self.conn:
+                    logging.error("Database connection is not established")
+                    return False
+            
+             
+                index_scripts = [
+                    """
                     CREATE INDEX IF NOT EXISTS idx_confetti_claims_claimed_at 
                     ON confetti_claims(claimed_at)
-                """)
-                conn.execute("""
+                    """,
+                    """
                     CREATE INDEX IF NOT EXISTS idx_confetti_trap_claims_claimed_at 
                     ON confetti_trap_claims(claimed_at)
-                """)
-                conn.execute("""
+                    """,
+                    """
                     CREATE INDEX IF NOT EXISTS idx_user_points_last_updated 
                     ON user_points(last_updated)
-                """)
-
-                conn.commit()
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_votes_expiry 
+                    ON votes(is_active, expires_at)
+                    """
+                ]
+                
+                self.conn.execute("BEGIN TRANSACTION")
+                
+                for script in index_scripts:
+                    try:
+                        self.conn.execute(script)
+                    except sqlite3.OperationalError as e:
+                        logging.warning(f"Could not create index: {e}")
+            
+           
+                self.conn.commit()
+            
                 logging.info("Successfully added database indexes")
-        except Exception as e:
-            logging.error(f"Error adding indexes: {str(e)}")
-            raise
+                return True
+            
+            except Exception as e:
+            
+                try:
+                    self.conn.rollback()
+                except:
+                    pass
+            
+                logging.error(f"Error adding indexes: {str(e)}")
+                return False
+
+    
+        result = await asyncio.get_event_loop().run_in_executor(
+            self.pool, 
+            _add_indexes
+        )
+    
+        return result
+
 
     async def cleanup_old_records(self):
         try:
@@ -1031,13 +1141,13 @@ class DatabaseService:
         if retry_count == max_retries:
             logging.critical("All cleanup attempts failed. Manual intervention may be required.")
 
+    
     def __exit__(self, exc_type, exc_val, exc_tb):
-
         if hasattr(self, 'schedule_cleanup'):
             self.schedule_cleanup.cancel()
         self.pool.shutdown(wait=True)
-        self.conn.close()
-
+        if self.conn:
+            self.conn.close()
 
     def __enter__(self):
         return self

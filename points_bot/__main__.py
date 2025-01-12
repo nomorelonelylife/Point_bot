@@ -1,10 +1,12 @@
 import os
 import sys
+import asyncio
 import logging
 from logging.handlers import RotatingFileHandler
 from typing import List
 from dotenv import load_dotenv
 from .bot import PointsBot
+from .database import DatabaseService
 
 def setup_logging():
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -36,7 +38,7 @@ def validate_env(required_envs: List[str]) -> None:
     except ValueError:
         raise ValueError("SOCIAL_CHANNEL_ID and OG_ROLE_ID must be valid integers")
 
-def main():
+async def main():
     try:
         load_dotenv()
         setup_logging()
@@ -49,6 +51,14 @@ def main():
         ]
         
         validate_env(required_envs)
+
+        print("Creating database instance...")
+        db = DatabaseService(
+            db_path=os.getenv('DB_PATH', './points.db')
+        )
+        
+        # 异步初始化数据库
+        await db.async_initialize()
 
         print("Creating bot instance...")
         logging.info("Creating bot instance...")
@@ -70,4 +80,4 @@ def main():
         sys.exit(1)
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

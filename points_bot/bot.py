@@ -35,14 +35,15 @@ class PointsBot(discord.Client):
         twitter_token: str, 
         channel_id: str, 
         og_role_id: str,
+        database_service: Optional[DatabaseService] = None,
         db_path: Optional[str] = None
     ):
         intents = discord.Intents.default()
         intents.members = True
         super().__init__(intents=intents)
-        
+    
         self.tree = app_commands.CommandTree(self)
-        self.db = DatabaseService(db_path or './points.db')
+        self.db = database_service or DatabaseService(db_path or './points.db')
         self.twitter = TwitterService(twitter_token)
         self.channel_id = int(channel_id)
         self.og_role_id = int(og_role_id)
