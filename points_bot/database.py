@@ -636,9 +636,22 @@ class DatabaseService:
                         (vote_id, creator_id, target_user_id, description, expires_at)
                         VALUES (?, ?, ?, ?, ?)
                     """, (vote_id, creator_id, target_user_id, description, expires_at))
-                
+                    
+                    
+                    print("Options received:", options)
+                    logging.error(f"Options received: {options}")
+
                     for option in options:
                         option_id = f"{vote_id}_{option['index']}"
+
+                        if 'option_text' not in option:
+                            logging.error(f"Missing 'option_text' in option: {option}")
+                            raise ValueError(f"Missing 'option_text' in option: {option}")
+                    
+                        if 'points' not in option:
+                            logging.error(f"Missing 'points' in option: {option}")
+                            raise ValueError(f"Missing 'points' in option: {option}")
+                        
                         cursor.execute("""
                             INSERT INTO vote_options 
                             (option_id, vote_id, option_text, points)
@@ -648,6 +661,7 @@ class DatabaseService:
                     conn.commit()
                 except Exception as e:
                     cursor.execute("ROLLBACK")
+                    logging.error(f"Error in create_vote: {str(e)}")
                     raise e
 
         await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
