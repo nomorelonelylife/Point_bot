@@ -245,36 +245,32 @@ class PointsBot(discord.Client):
                         ephemeral=True
                     )
                     return
-
-                ball_id = f"ball_{int(time.time())}_{interaction.user.id}"
-        
-                if not message:
-                    message = "I prepared a confetti ball, LET's Loot!!!!"
-                elif len(message) > 140:
-                    message = message[:140]
                 
                 # Validate expiration
+                expires_at = None
                 if expires_in is not None:
                     if expires_in < 1 or expires_in > 24 * 60 * 60:  # 1 second to 24 hours
                         await interaction.response.send_message(
                             "Expiration must be between 1 second and 24 hours",
                             ephemeral=True
                         )
-
-                # Calculate expiration time
-                expires_at = None
-                if expires_in is not None:
+                        return
                     expires_at = datetime.now() + timedelta(seconds=expires_in)
 
                 ball_id = f"ball_{int(time.time())}_{interaction.user.id}"
 
-
+        
+                if not message:
+                    message = "I prepared a confetti ball, LET's Loot!!!!"
+                elif len(message) > 140:
+                    message = message[:140]
+                
                 await self.db.create_confetti_ball(
                     ball_id=ball_id,
                     creator_id=str(interaction.user.id),
                     total_points=total_points,
                     max_claims=max_claims,
-                    message=message or "I prepared a confetti ball, LET's Loot!!!!",
+                    message=message,
                     channel_id=str(interaction.channel_id),
                     expires_at=expires_at
                 )
@@ -282,7 +278,7 @@ class PointsBot(discord.Client):
                 # Get the actual expiration time (in case it was randomly generated)
                 ball = await self.db.get_confetti_ball(ball_id)
                 expires_at = datetime.fromisoformat(ball['expires_at'])
-        
+
                 # Calculate time remaining
                 time_remaining = expires_at - datetime.now()
                 time_str = (
@@ -316,9 +312,7 @@ class PointsBot(discord.Client):
                     f"An error occurred while creating the confetti ball: {str(e)}\nPlease try again or contact an administrator.",
                     ephemeral=True
                 )
-        
-
-
+                
         @self.tree.command(name="activeposts", description="View monitored posts")
         @app_commands.checks.has_permissions(administrator=True)
         async def activeposts(interaction: discord.Interaction):
