@@ -647,11 +647,10 @@ class PointsBot(discord.Client):
                                     ephemeral=True
                                 )
                                 return
-                                # 移到这里，在检查 points <= 0 之后
                             options.append({
                                 'index': i,
                                 'text': text.strip(),
-                                'points': round(points, 8)
+                                'option_text': text.strip()
                             })
                         except ValueError:
                             await interaction.response.send_message(
