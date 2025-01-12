@@ -588,7 +588,6 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
 
-        #test
         @self.tree.command(name="createvote", description="Create a vote (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
         @app_commands.describe(
@@ -624,7 +623,7 @@ class PointsBot(discord.Client):
                         ephemeral=True
                     )
                     return
-            
+    
                 # Validate expiration
                 if expires_in < 1 or expires_in > 30:
                     await interaction.response.send_message(
@@ -632,25 +631,26 @@ class PointsBot(discord.Client):
                         ephemeral=True
                     )
                     return
-            
+    
                 # Process options
                 options = []
                 for i, opt in enumerate([option1, option2, option3, option4, option5,
                                        option6, option7, option8, option9, option10]):
                     if opt:
                         try:
-                            text, points = opt.split('|')
-                            points = float(points)
+                            text, points_str = opt.split('|')
+                            points = float(points_str)
                             if points <= 0:
                                 await interaction.response.send_message(
                                     f"Points must be positive for option {i+1}",
                                     ephemeral=True
                                 )
                                 return
+                    
                             options.append({
                                 'index': i,
-                                'text': text.strip(),
-                                'option_text': text.strip()
+                                'option_text': text.strip(),
+                                'points': round(points, 8)
                             })
                         except ValueError:
                             await interaction.response.send_message(
@@ -658,17 +658,17 @@ class PointsBot(discord.Client):
                                 ephemeral=True
                             )
                             return
-                    
+        
                 if len(options) < 2:
                     await interaction.response.send_message(
                         "You must provide at least 2 options",
                         ephemeral=True
                     )
                     return
-            
+    
                 # Defer response as the next operations might take some time
                 await interaction.response.defer()
-            
+    
                 # Create vote
                 vote_id = f"vote_{int(time.time())}_{interaction.user.id}"
                 await self.db.create_vote(
@@ -679,13 +679,13 @@ class PointsBot(discord.Client):
                     options=options,
                     expires_in_days=expires_in
                 )
-        
+
                 # Create options text
                 options_text = "\n".join(
-                    f"{i+1}. {opt['text']} ({opt['points']:.8f} points)"
+                    f"{i+1}. {opt['option_text']} ({opt['points']:.8f} points)"
                     for i, opt in enumerate(options)
                 )
-        
+
                 # Create vote message
                 message = (
                     f"🗳️ **New Vote** by {interaction.user.mention}\n\n"
@@ -694,16 +694,16 @@ class PointsBot(discord.Client):
                     f"**Options**:\n{options_text}\n\n"
                     f"**Expires in**: {expires_in} days\n"
                     f"Current votes: 0\n"
-                    f"Total points awarded: 0"
+                    f"Total awarded points: 0"
                 )
-        
+
                 # Create and setup vote view
                 view = VoteView(self.db, vote_id)
                 await view.create_buttons(options)
-        
+
                 # Send vote message
                 await interaction.followup.send(message, view=view)
-        
+
             except Exception as e:
                 logging.error(f"Create vote error: {str(e)}")
                 if not interaction.response.is_done():
