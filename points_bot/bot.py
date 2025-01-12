@@ -67,7 +67,6 @@ class PointsBot(discord.Client):
             print("Registering commands...")
             logging.info("Registering commands...")
         
-            await self.register_commands()
         
             print("Starting bot...")
             logging.info("Starting bot...")
