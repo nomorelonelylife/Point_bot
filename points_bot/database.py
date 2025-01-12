@@ -480,9 +480,10 @@ class DatabaseService:
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
                 # If no expiration provided, generate a random expiration between 1s and 24 hours
+                nonlocal expires_at
                 if expires_at is None:
                     expires_at = datetime.now() + timedelta(
-                        seconds=random.uniform(1, 24 * 60 * 60)
+                       seconds=random.uniform(1, 24 * 60 * 60)
                     )
                 
                 conn.execute("""
@@ -601,11 +602,13 @@ class DatabaseService:
         expires_at: Optional[datetime] = None
     ) -> None:
         def db_operation():
-            # If no expiration provided, generate a random expiration between 1s and 24 hours
-            if expires_at is None:
-                expires_at = datetime.now() + timedelta(
-                    seconds=random.uniform(1, 24 * 60 * 60)
-                )
+            with sqlite3.connect(self.db_path) as conn:
+                # If no expiration provided, generate a random expiration between 1s and 24 hours
+                nonlocal expires_at
+                if expires_at is None:
+                    expires_at = datetime.now() + timedelta(
+                        seconds=random.uniform(1, 24 * 60 * 60)
+                    )
             
             conn.execute("""
                 INSERT INTO confetti_traps 
