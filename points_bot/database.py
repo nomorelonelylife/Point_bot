@@ -37,6 +37,27 @@ class DatabaseService:
                 reply_points REAL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS confetti_balls (
+                ball_id TEXT PRIMARY KEY,
+                creator_id TEXT NOT NULL,
+                total_points REAL NOT NULL,
+                max_claims INTEGER NOT NULL,
+                claimed_count INTEGER DEFAULT 0,
+                message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                channel_id TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE
+            );
+
+            CREATE TABLE IF NOT EXISTS confetti_claims (
+                claim_id TEXT PRIMARY KEY,
+                ball_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                points_claimed REAL NOT NULL,
+                claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(ball_id) REFERENCES confetti_balls(ball_id),
+                UNIQUE(ball_id, user_id)
+            );
         """)
         self.conn.commit()
 
@@ -300,6 +321,113 @@ class DatabaseService:
             self.pool,
             db_operation
         )
+
+    async def create_confetti_ball(self, ball_id: str, creator_id: str, total_points: float, 
+                                 max_claims: int, message: str, channel_id: str) -> None:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO confetti_balls 
+                    (ball_id, creator_id, total_points, max_claims, message, channel_id)
+                    VALUES (?, ?, ROUND(?, 8), ?, ?, ?)
+                """, (ball_id, creator_id, total_points, max_claims, message, channel_id))
+                conn.commit()
+
+        await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def get_confetti_ball(self, ball_id: str) -> Optional[Dict]:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT * FROM confetti_balls 
+                    WHERE ball_id = ? AND is_active = TRUE
+                """, (ball_id,)).fetchone()
+                return dict(row) if row else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def claim_confetti_ball(self, ball_id: str, user_id: str, points: float) -> bool:
+        def db_operation():
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
+            
+                ball = cursor.execute("""
+                    SELECT total_points, max_claims, claimed_count 
+                    FROM confetti_balls 
+                    WHERE ball_id = ? AND is_active = TRUE
+                """, (ball_id,)).fetchone()
+            
+                if not ball:
+                    cursor.execute("ROLLBACK")
+                    return False
+                
+                total_points, max_claims, claimed_count = ball
+            
+                # Check if user already claimed
+                already_claimed = cursor.execute("""
+                    SELECT 1 FROM confetti_claims 
+                    WHERE ball_id = ? AND user_id = ?
+                """, (ball_id, user_id)).fetchone()
+            
+                if already_claimed:
+                    cursor.execute("ROLLBACK")
+                    return False
+                
+                if claimed_count >= max_claims:
+                    cursor.execute("ROLLBACK")
+                    return False
+            
+                claim_id = f"{ball_id}_{user_id}"
+                cursor.execute("""
+                    INSERT INTO confetti_claims (claim_id, ball_id, user_id, points_claimed)
+                    VALUES (?, ?, ?, ROUND(?, 8))
+                """, (claim_id, ball_id, user_id, points))
+            
+                cursor.execute("""
+                    UPDATE confetti_balls 
+                    SET claimed_count = claimed_count + 1,
+                        is_active = CASE 
+                            WHEN claimed_count + 1 >= max_claims THEN FALSE 
+                            ELSE TRUE 
+                        END
+                    WHERE ball_id = ?
+                """, (ball_id,))
+            
+                cursor.execute("""
+                    INSERT INTO user_points (user_id, username, points)
+                    VALUES (?, 'Unknown', ROUND(?, 8))
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        points = ROUND(points + ?, 8)
+                """, (user_id, points, points))
+            
+                conn.commit()
+                return True
+            
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                logging.error(f"Error claiming confetti ball: {str(e)}")
+                return False
+            finally:
+                conn.close()
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def get_confetti_claims(self, ball_id: str) -> List[Dict]:
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT user_id, points_claimed, claimed_at
+                    FROM confetti_claims
+                    WHERE ball_id = ?
+                    ORDER BY claimed_at ASC
+                """, (ball_id,)).fetchall()
+                return [dict(row) for row in rows]
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
     def __enter__(self):
         return self

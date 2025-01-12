@@ -196,6 +196,88 @@ class PointsBot(discord.Client):
                     ephemeral=True
                )
 
+        @self.tree.command(name="confetti", description="Create a confetti ball with points")
+        @app_commands.describe(
+            total_points="Total points to put in the confetti ball (min: 0.00000001)",
+            max_claims="Maximum number of users who can claim points (min: 1, max: 100)",
+            message="Optional message to display (max 140 characters)"
+        )
+        async def confetti(
+            interaction: discord.Interaction,
+            total_points: float,
+            max_claims: int,
+            message: Optional[str] = None
+        ):
+            try:
+                # Validate inputs
+                if total_points < 0.00000001:
+                    await interaction.response.send_message(
+                        "Minimum total points is 0.00000001",
+                        ephemeral=True
+                    )
+                    return
+
+                if max_claims < 1 or max_claims > 100:
+                    await interaction.response.send_message(
+                        "Number of claims must be between 1 and 100",
+                        ephemeral=True
+                    )
+                    return
+
+                if not interaction.guild:
+                    await interaction.response.send_message(
+                        "This command can only be used in a server",
+                        ephemeral=True
+                    )
+                    return
+
+                total_points = round(total_points, 8)
+        
+                user_points = await self.db.get_points(str(interaction.user.id))
+                if user_points < total_points:
+                    await interaction.response.send_message(
+                        "You don't have enough points",
+                        ephemeral=True
+                    )
+                    return
+
+                ball_id = f"ball_{int(time.time())}_{interaction.user.id}"
+        
+                if not message:
+                    message = "I prepared a confetti ball, LET's Loot!!!!"
+                elif len(message) > 140:
+                    message = message[:140]
+
+                await self.db.create_confetti_ball(
+                    ball_id=ball_id,
+                    creator_id=str(interaction.user.id),
+                    total_points=total_points,
+                    max_claims=max_claims,
+                    message=message,
+                    channel_id=str(interaction.channel_id)
+                )
+
+                await self.db.transfer_points(
+                    str(interaction.user.id),
+                    "confetti_pool",
+                    total_points
+                )
+
+                view = ConfettiView(self.db, ball_id, max_claims)
+                await interaction.response.send_message(
+                    f"🎊 {interaction.user.mention} says: {message}\n"
+                    f"Quick! {max_claims} lucky users can claim points from this confetti ball!",
+                    view=view
+                )
+
+            except Exception as e:
+                self.error_logger.log_error(e, "confetti command")
+                await interaction.response.send_message(
+                    "An error occurred while creating the confetti ball",
+                    ephemeral=True
+                )
+        
+
 
         @self.tree.command(name="activeposts", description="View monitored posts")
         @app_commands.checks.has_permissions(administrator=True)
@@ -838,5 +920,92 @@ class PointsBot(discord.Client):
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
         print('------')
-    
+
+class ConfettiView(discord.ui.View):
+    def __init__(self, db: DatabaseService, ball_id: str, max_claims: int):
+        super().__init__(timeout=None)
+        self.db = db
+        self.ball_id = ball_id
+        self.max_claims = max_claims
+
+    @discord.ui.button(
+        label="🎊 Grab Points! 🎊", 
+        style=discord.ButtonStyle.success,
+        custom_id="confetti_claim"
+    )
+    async def claim_button(
+        self, 
+        interaction: discord.Interaction, 
+        button: discord.ui.Button
+    ):
+        try:
+            ball = await self.db.get_confetti_ball(self.ball_id)
+            if not ball:
+                await interaction.response.send_message(
+                    "This confetti ball is no longer active!",
+                    ephemeral=True
+                )
+                button.disabled = True
+                await interaction.message.edit(view=self)
+                return
+
+            remaining_points = ball['total_points']
+            remaining_claims = ball['max_claims'] - ball['claimed_count']
+
+            if remaining_claims <= 0:
+                await interaction.response.send_message(
+                    "This confetti ball has been claimed by enough users!",
+                    ephemeral=True
+                )
+                button.disabled = True
+                await interaction.message.edit(view=self)
+                return
+
+            if remaining_claims == 1:
+                points = remaining_points
+            else:
+                max_claim = remaining_points * 0.9
+                min_claim = remaining_points * 0.01
+                points = round(random.uniform(min_claim, max_claim), 8)
+
+            success = await self.db.claim_confetti_ball(
+                self.ball_id,
+                str(interaction.user.id),
+                points
+            )
+
+            if success:
+                await interaction.response.send_message(
+                    f"🎉 You grabbed {points:.8f} points!",
+                    ephemeral=True
+                )
+                
+                ball = await self.db.get_confetti_ball(self.ball_id)
+                if not ball or ball['claimed_count'] >= ball['max_claims']:
+                    button.disabled = True
+                    await interaction.message.edit(view=self)
+                    
+                    claims = await self.db.get_confetti_claims(self.ball_id)
+                    summary = "\n".join(
+                        f"{interaction.guild.get_member(int(claim['user_id'])).mention}: {claim['points_claimed']:.8f} points"
+                        for claim in claims
+                    )
+                    
+                    creator = interaction.guild.get_member(int(ball['creator_id']))
+                    creator_mention = creator.mention if creator else "Unknown User"
+                    await interaction.channel.send(
+                        f"🎊 Confetti ball from {creator_mention} is complete! Here's who got lucky:\n{summary}"
+                    )
+            else:
+                await interaction.response.send_message(
+                    "You've already claimed from this confetti ball!",
+                    ephemeral=True
+                )
+
+        except Exception as e:
+            logging.error(f"Error in confetti claim: {str(e)}")
+            await interaction.response.send_message(
+                "An error occurred while claiming points",
+                ephemeral=True
+            )
  
