@@ -10,11 +10,14 @@ import aiohttp
 import time
 from discord import app_commands
 from discord.ext import tasks
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable, Any, TypeVar, Awaitable, ParamSpec
 from datetime import datetime, timedelta
 from .database import DatabaseService
 from .twitter_service import TwitterService
 from collections import deque
+
+
+
 
 class ErrorLogger:
     def __init__(self, max_logs=30):
@@ -29,9 +32,11 @@ class ErrorLogger:
             'context': context
         })
 
+P = ParamSpec('P')
+R = TypeVar('R')
 
-def handle_command_exceptions(func):
-    async def wrapper(*args, **kwargs):
+def handle_command_exceptions(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[None]]:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
         try:
             return await func(*args, **kwargs)
         except (ValueError, TypeError, OverflowError) as e:
