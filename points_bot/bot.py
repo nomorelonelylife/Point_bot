@@ -594,18 +594,17 @@ class PointsBot(discord.Client):
         @app_commands.describe(
             user="User who will receive the points",
             description="Vote description/topic",
-            expires_in="Days until vote expires (default: 7)",
             option1="Option 1 format: text|points",
             option2="Option 2 format: text|points",
             option3="Option 3 format: text|points (optional)",
             option4="Option 4 format: text|points (optional)",
-            option5="Option 5 format: text|points (optional)"
+            option5="Option 5 format: text|points (optional)",
+            expires_in="Days until vote expires (default: 7)"
         )
         async def createvote(
             interaction: discord.Interaction,
             user: discord.User,
             description: str,
-            expires_in: Optional[int] = 7,
             option1: str,
             option2: str,
             option3: Optional[str] = None,
@@ -615,7 +614,8 @@ class PointsBot(discord.Client):
             option7: Optional[str] = None,
             option8: Optional[str] = None,
             option9: Optional[str] = None,
-            option10: Optional[str] = None
+            option10: Optional[str] = None,
+            expires_in: Optional[int] = 7
         ):
             try:
                 if not interaction.guild:
