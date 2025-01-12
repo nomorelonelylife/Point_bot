@@ -203,13 +203,15 @@ class PointsBot(discord.Client):
         @app_commands.describe(
             total_points="Total points to put in the confetti ball (min: 0.00000001)",
             max_claims="Maximum number of users who can claim points (min: 1, max: 100)",
-            message="Optional message to display (max 140 characters)"
+            message="Optional message to display (max 140 characters)",
+            expires_in="Expiration time in seconds (optional, random if not set)"
         )
         async def confetti(
             interaction: discord.Interaction,
             total_points: float,
             max_claims: int,
-            message: Optional[str] = None
+            message: Optional[str] = None,
+            expires_in: Optional[int] = None
         ):
             try:
                 # Validate inputs
@@ -250,14 +252,43 @@ class PointsBot(discord.Client):
                     message = "I prepared a confetti ball, LET's Loot!!!!"
                 elif len(message) > 140:
                     message = message[:140]
+                
+                # Validate expiration
+                if expires_in is not None:
+                    if expires_in < 1 or expires_in > 24 * 60 * 60:  # 1 second to 24 hours
+                        await interaction.response.send_message(
+                            "Expiration must be between 1 second and 24 hours",
+                            ephemeral=True
+                        )
+
+                # Calculate expiration time
+                expires_at = None
+                if expires_in is not None:
+                    expires_at = datetime.now() + timedelta(seconds=expires_in)
+
+                ball_id = f"ball_{int(time.time())}_{interaction.user.id}"
+
 
                 await self.db.create_confetti_ball(
                     ball_id=ball_id,
                     creator_id=str(interaction.user.id),
                     total_points=total_points,
                     max_claims=max_claims,
-                    message=message,
-                    channel_id=str(interaction.channel_id)
+                    message=message or "I prepared a confetti ball, LET's Loot!!!!",
+                    channel_id=str(interaction.channel_id),
+                    expires_at=expires_at
+                )
+
+                # Get the actual expiration time (in case it was randomly generated)
+                ball = await self.db.get_confetti_ball(ball_id)
+                expires_at = datetime.fromisoformat(ball['expires_at'])
+        
+                # Calculate time remaining
+                time_remaining = expires_at - datetime.now()
+                time_str = (
+                    f"{time_remaining.total_seconds():.0f} seconds" 
+                    if time_remaining.total_seconds() < 3600 
+                    else f"{time_remaining.total_seconds() / 3600:.1f} hours"
                 )
 
                 await self.db.transfer_points(
@@ -271,6 +302,7 @@ class PointsBot(discord.Client):
                     f"🎊 Confetti Ball 🎊\n"
                     f"{ interaction.user.mention} says: {message}\n"
                     f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!",
+                    f"⏰ Expires in: {time_str}",
                     view=view
                 )
 
@@ -851,12 +883,14 @@ class PointsBot(discord.Client):
         @self.tree.command(name="confettitrap", description="Create a confetti trap")
         @app_commands.describe(
             max_claims="Maximum number of users who can fall for the trap (min: 1, max: 100)",
-            message="Optional message to display (max 140 characters)"
+            message="Optional message to display (max 140 characters)",
+            expires_in="Expiration time in seconds (optional, random if not set)"
         )
         async def confettitrap(
             interaction: discord.Interaction,
             max_claims: int,
-            message: Optional[str] = None
+            message: Optional[str] = None,
+            expires_in: Optional[int] = None
         ):
             try:
                 if max_claims < 1 or max_claims > 100:
@@ -872,6 +906,19 @@ class PointsBot(discord.Client):
                         ephemeral=True
                     )
                     return
+                
+                # Validate expiration similar to the confetti command
+                if expires_in is not None:
+                    if expires_in < 1 or expires_in > 24 * 60 * 60:  
+                        await interaction.response.send_message(
+                            "Expiration must be between 1 second and 24 hours",
+                            ephemeral=True
+                        )
+
+                # Calculate expiration time
+                expires_at = None
+                if expires_in is not None:
+                    expires_at = datetime.now() + timedelta(seconds=expires_in)
 
                 trap_id = f"trap_{int(time.time())}_{interaction.user.id}"
         
@@ -885,7 +932,20 @@ class PointsBot(discord.Client):
                     creator_id=str(interaction.user.id),
                     max_claims=max_claims,
                     message=message,
-                    channel_id=str(interaction.channel_id)
+                    channel_id=str(interaction.channel_id),
+                    expires_at=expires_at
+                )
+
+                # Get the actual expiration time
+                trap = await self.db.get_confetti_trap(trap_id)
+                expires_at = datetime.fromisoformat(trap['expires_at'])
+        
+                # Calculate time remaining
+                time_remaining = expires_at - datetime.now()
+                time_str = (
+                    f"{time_remaining.total_seconds():.0f} seconds" 
+                    if time_remaining.total_seconds() < 3600 
+                    else f"{time_remaining.total_seconds() / 3600:.1f} hours"
                 )
 
                 view = ConfettiTrapView(
@@ -898,6 +958,7 @@ class PointsBot(discord.Client):
                     f"🎊 Confetti Trap 🎊\n"
                     f"{ interaction.user.mention} says: {message}\n"
                     f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!",
+                    f"⏰ Expires in: {time_str}",
                     view=view
                 )
 

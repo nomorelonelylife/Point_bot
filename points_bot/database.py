@@ -65,6 +65,7 @@ class DatabaseService:
                         message TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         channel_id TEXT NOT NULL,
+                        expires_at TIMESTAMP NOT NULL,
                         is_active BOOLEAN DEFAULT TRUE
                     );
 
@@ -86,6 +87,7 @@ class DatabaseService:
                         message TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         channel_id TEXT NOT NULL,
+                        expires_at TIMESTAMP NOT NULL,
                         is_active BOOLEAN DEFAULT TRUE
                     );
 
@@ -465,15 +467,29 @@ class DatabaseService:
             db_operation
         )
 
-    async def create_confetti_ball(self, ball_id: str, creator_id: str, total_points: float, 
-                                 max_claims: int, message: str, channel_id: str) -> None:
+    async def create_confetti_ball(
+        self, 
+        ball_id: str, 
+        creator_id: str, 
+        total_points: float, 
+        max_claims: int, 
+        message: str, 
+        channel_id: str,
+        expires_at: Optional[datetime] = None
+    ) -> None:
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
+                # If no expiration provided, generate a random expiration between 1s and 24 hours
+                if expires_at is None:
+                    expires_at = datetime.now() + timedelta(
+                        seconds=random.uniform(1, 24 * 60 * 60)
+                    )
+                
                 conn.execute("""
                     INSERT INTO confetti_balls 
-                    (ball_id, creator_id, total_points, max_claims, message, channel_id)
-                    VALUES (?, ?, ROUND(?, 8), ?, ?, ?)
-                """, (ball_id, creator_id, total_points, max_claims, message, channel_id))
+                    (ball_id, creator_id, total_points, max_claims, message, channel_id, expires_at)
+                    VALUES (?, ?, ROUND(?, 8), ?, ?, ?, ?)
+                """, (ball_id, creator_id, total_points, max_claims, message, channel_id, expires_at))
                 conn.commit()
 
         await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
@@ -484,7 +500,9 @@ class DatabaseService:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("""
                     SELECT * FROM confetti_balls 
-                    WHERE ball_id = ? AND is_active = TRUE
+                    WHERE ball_id = ? 
+                    AND is_active = TRUE 
+                    AND datetime('now') < datetime(expires_at)
                 """, (ball_id,)).fetchone()
                 return dict(row) if row else None
 
@@ -573,15 +591,28 @@ class DatabaseService:
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
     
 
-    async def create_confetti_trap(self, trap_id: str, creator_id: str, max_claims: int, message: str, channel_id: str) -> None:
+    async def create_confetti_trap(
+        self, 
+        trap_id: str, 
+        creator_id: str, 
+        max_claims: int, 
+        message: str, 
+        channel_id: str,
+        expires_at: Optional[datetime] = None
+    ) -> None:
         def db_operation():
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    INSERT INTO confetti_traps 
-                    (trap_id, creator_id, max_claims, message, channel_id)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (trap_id, creator_id, max_claims, message, channel_id))
-                conn.commit()
+            # If no expiration provided, generate a random expiration between 1s and 24 hours
+            if expires_at is None:
+                expires_at = datetime.now() + timedelta(
+                    seconds=random.uniform(1, 24 * 60 * 60)
+                )
+            
+            conn.execute("""
+                INSERT INTO confetti_traps 
+                (trap_id, creator_id, max_claims, message, channel_id, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (trap_id, creator_id, max_claims, message, channel_id, expires_at))
+            conn.commit()
 
         await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
@@ -591,7 +622,9 @@ class DatabaseService:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("""
                     SELECT * FROM confetti_traps 
-                    WHERE trap_id = ? AND is_active = TRUE
+                    WHERE trap_id = ? 
+                    AND is_active = TRUE 
+                    AND datetime('now') < datetime(expires_at)
                 """, (trap_id,)).fetchone()
                 return dict(row) if row else None
 
@@ -1024,6 +1057,16 @@ class DatabaseService:
                             ("confetti_claims", """
                                 DELETE FROM confetti_claims 
                                 WHERE datetime(claimed_at) < datetime('now', '-7 days')
+                            """),
+                            ("confetti_balls", """
+                                DELETE FROM confetti_balls 
+                                WHERE is_active = TRUE 
+                                AND datetime('now') > datetime(expires_at)
+                            """),
+                            ("confetti_traps", """
+                                DELETE FROM confetti_traps 
+                                WHERE is_active = TRUE 
+                                AND datetime('now') > datetime(expires_at)
                             """)
                         ]
                     
