@@ -268,8 +268,9 @@ class PointsBot(discord.Client):
 
                 view = ConfettiView(self.db, ball_id, max_claims)
                 await interaction.response.send_message(
-                    f"🎊 {interaction.user.mention} says: {message}\n"
-                    f"Quick! {max_claims} lucky users can claim points from this confetti ball!",
+                    f"🎊 Confetti Ball 🎊\n"
+                    f"{ interaction.user.mention} says: {message}\n"
+                    f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!",
                     view=view
                 )
 
@@ -894,8 +895,9 @@ class PointsBot(discord.Client):
                     max_claims
                 ) 
                 await interaction.response.send_message(
-                    f"🎊 {interaction.user.mention} says: {message}\n"
-                    f"Quick! {max_claims} lucky users can claim points from this confetti!",
+                    f"🎊 Confetti Trap 🎊\n"
+                    f"{ interaction.user.mention} says: {message}\n"
+                    f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!",
                     view=view
                 )
 
@@ -1272,7 +1274,7 @@ class ConfettiView(discord.ui.View):
             else:
                 logging.info(f"Claim rejected (already claimed) - Ball ID: {self.ball_id}, User: {interaction.user.id}")
                 await interaction.response.send_message(
-                    "You've already claimed from this confetti ball!",
+                    "You've already got your pie from this confetti ball!",
                     ephemeral=True
                 )
 
@@ -1348,7 +1350,7 @@ class ConfettiTrapView(discord.ui.View):
 
             else:
                 await interaction.response.send_message(
-                    "You've already interacted with this confetti!",
+                    "You've already been looted!",
                     ephemeral=True
                 )
 
