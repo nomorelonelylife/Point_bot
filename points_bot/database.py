@@ -2,7 +2,7 @@ import sqlite3
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 import logging
 
