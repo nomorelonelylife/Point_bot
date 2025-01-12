@@ -271,9 +271,13 @@ class PointsBot(discord.Client):
                 )
 
             except Exception as e:
-                self.error_logger.log_error(e, "confetti command")
+                error_msg = f"Error in confetti command: {str(e)}\nUser: {interaction.user.id}\nTotal Points: {total_points}\nMax Claims: {max_claims}\nMessage: {message}"
+                print(error_msg)  
+                logging.error(error_msg) 
+                self.error_logger.log_error(e, f"confetti command - Details: {error_msg}")
+        
                 await interaction.response.send_message(
-                    "An error occurred while creating the confetti ball",
+                    f"An error occurred while creating the confetti ball: {str(e)}\nPlease try again or contact an administrator.",
                     ephemeral=True
                 )
         
@@ -939,8 +943,11 @@ class ConfettiView(discord.ui.View):
         button: discord.ui.Button
     ):
         try:
+            logging.info(f"Confetti claim attempt - Ball ID: {self.ball_id}, User: {interaction.user.id}")
+        
             ball = await self.db.get_confetti_ball(self.ball_id)
             if not ball:
+                logging.warning(f"Confetti ball not found or inactive - Ball ID: {self.ball_id}")
                 await interaction.response.send_message(
                     "This confetti ball is no longer active!",
                     ephemeral=True
@@ -951,8 +958,11 @@ class ConfettiView(discord.ui.View):
 
             remaining_points = ball['total_points']
             remaining_claims = ball['max_claims'] - ball['claimed_count']
+        
+            logging.info(f"Confetti claim status - Ball ID: {self.ball_id}, Remaining claims: {remaining_claims}, Remaining points: {remaining_points}")
 
             if remaining_claims <= 0:
+                logging.info(f"Confetti ball max claims reached - Ball ID: {self.ball_id}")
                 await interaction.response.send_message(
                     "This confetti ball has been claimed by enough users!",
                     ephemeral=True
@@ -967,45 +977,65 @@ class ConfettiView(discord.ui.View):
                 max_claim = remaining_points * 0.9
                 min_claim = remaining_points * 0.01
                 points = round(random.uniform(min_claim, max_claim), 8)
+        
+            logging.info(f"Attempting to claim points - Ball ID: {self.ball_id}, User: {interaction.user.id}, Points: {points}")
 
-            success = await self.db.claim_confetti_ball(
-                self.ball_id,
-                str(interaction.user.id),
-                points
-            )
+            try:
+                success = await self.db.claim_confetti_ball(
+                    self.ball_id,
+                    str(interaction.user.id),
+                    points
+                )
+            except Exception as e:
+                error_msg = f"Database error in claim_confetti_ball - Ball ID: {self.ball_id}, User: {interaction.user.id}, Error: {str(e)}"
+                logging.error(error_msg)
+                await interaction.response.send_message(
+                    "An error occurred while claiming points. Please try again.",
+                    ephemeral=True
+                )
+                return
 
             if success:
+                logging.info(f"Claim successful - Ball ID: {self.ball_id}, User: {interaction.user.id}, Points: {points}")
                 await interaction.response.send_message(
                     f"🎉 You grabbed {points:.8f} points!",
                     ephemeral=True
                 )
-                
-                ball = await self.db.get_confetti_ball(self.ball_id)
-                if not ball or ball['claimed_count'] >= ball['max_claims']:
-                    button.disabled = True
-                    await interaction.message.edit(view=self)
+            
+                try:
+                    ball = await self.db.get_confetti_ball(self.ball_id)
+                    if not ball or ball['claimed_count'] >= ball['max_claims']:
+                        button.disabled = True
+                        await interaction.message.edit(view=self)
                     
-                    claims = await self.db.get_confetti_claims(self.ball_id)
-                    summary = "\n".join(
-                        f"{interaction.guild.get_member(int(claim['user_id'])).mention}: {claim['points_claimed']:.8f} points"
-                        for claim in claims
-                    )
+                        claims = await self.db.get_confetti_claims(self.ball_id)
+                        summary = "\n".join(
+                            f"{interaction.guild.get_member(int(claim['user_id'])).mention}: {claim['points_claimed']:.8f} points"
+                            for claim in claims
+                        )
                     
-                    creator = interaction.guild.get_member(int(ball['creator_id']))
-                    creator_mention = creator.mention if creator else "Unknown User"
-                    await interaction.channel.send(
-                        f"🎊 Confetti ball from {creator_mention} is complete! Here's who got lucky:\n{summary}"
-                    )
+                        creator = interaction.guild.get_member(int(ball['creator_id']))
+                        creator_mention = creator.mention if creator else "Unknown User"
+                        await interaction.channel.send(
+                            f"🎊 Confetti ball from {creator_mention} is complete! Here's who got lucky:\n{summary}"
+                        )
+                        logging.info(f"Confetti ball completed - Ball ID: {self.ball_id}")
+                except Exception as e:
+                    error_msg = f"Error updating button state or sending summary - Ball ID: {self.ball_id}, Error: {str(e)}"
+                    logging.error(error_msg)
+
             else:
+                logging.info(f"Claim rejected (already claimed) - Ball ID: {self.ball_id}, User: {interaction.user.id}")
                 await interaction.response.send_message(
                     "You've already claimed from this confetti ball!",
                     ephemeral=True
                 )
 
         except Exception as e:
-            logging.error(f"Error in confetti claim: {str(e)}")
+            error_msg = f"Unexpected error in confetti claim - Ball ID: {self.ball_id}, User: {interaction.user.id}, Error: {str(e)}"
+            logging.error(error_msg)
+            print(error_msg)  
             await interaction.response.send_message(
-                "An error occurred while claiming points",
+                "An unexpected error occurred. Please try again or contact an administrator.",
                 ephemeral=True
             )
- 
