@@ -32,20 +32,18 @@ class ErrorLogger:
             'context': context
         })
 
-def handle_command_exceptions(func: Callable[..., Coroutine[Any, Any, Any]]) -> Callable[..., Coroutine[Any, Any, None]]:
-    async def wrapper(*args: Any, **kwargs: Any) -> None:
+def handle_command_exceptions(func):
+    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
         try:
-            return await func(*args, **kwargs)
+            return await func(interaction, *args, **kwargs)
         except (ValueError, TypeError, OverflowError) as e:
-            interaction = args[0] if args else None
-            if interaction and hasattr(interaction, 'response'):
+            if hasattr(interaction, 'response'):
                 await interaction.response.send_message(
                     f"Invalid input: {str(e)}",
                     ephemeral=True
                 )
         except Exception as e:
-            interaction = args[0] if args else None
-            if interaction and hasattr(interaction, 'response'):
+            if hasattr(interaction, 'response'):
                 await interaction.response.send_message(
                     "An unexpected error occurred. Please try again.",
                     ephemeral=True
