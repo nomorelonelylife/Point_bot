@@ -627,42 +627,51 @@ class DatabaseService:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 try:
+
                     cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
                 
+
                     expires_at = datetime.now() + timedelta(days=expires_in_days)
                 
+
                     cursor.execute("""
                         INSERT INTO votes 
                         (vote_id, creator_id, target_user_id, description, expires_at)
                         VALUES (?, ?, ?, ?, ?)
                     """, (vote_id, creator_id, target_user_id, description, expires_at))
-                    
-                    
-                    print("Options received:", options)
-                    logging.error(f"Options received: {options}")
+                
 
                     for option in options:
-                        option_id = f"{vote_id}_{option['index']}"
 
-                        if 'option_text' not in option:
-                            logging.error(f"Missing 'option_text' in option: {option}")
-                            raise ValueError(f"Missing 'option_text' in option: {option}")
+                        if not all(key in option for key in ['index', 'option_text', 'points']):
+                            raise ValueError(f"Invalid option format: {option}")
+                     
+
+                        option_id = f"{vote_id}_{option['index']}"
                     
-                        if 'points' not in option:
-                            logging.error(f"Missing 'points' in option: {option}")
-                            raise ValueError(f"Missing 'points' in option: {option}")
-                        
+
                         cursor.execute("""
                             INSERT INTO vote_options 
                             (option_id, vote_id, option_text, points)
                             VALUES (?, ?, ?, ROUND(?, 8))
-                        """, (option_id, vote_id, option['text'], option['points']))
+                        """, (
+                            option_id, 
+                            vote_id, 
+                            option['option_text'], 
+                            option['points']
+                        ))
                 
+
                     conn.commit()
+            
                 except Exception as e:
+
                     cursor.execute("ROLLBACK")
                     logging.error(f"Error in create_vote: {str(e)}")
-                    raise e
+                    logging.error(f"Vote details - ID: {vote_id}, Creator: {creator_id}, Target: {target_user_id}")
+                    logging.error(f"Options: {options}")
+                    raise
+    
 
         await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
