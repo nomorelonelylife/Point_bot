@@ -1180,7 +1180,7 @@ class ConfettiView(discord.ui.View):
         self.max_claims = max_claims
 
     @discord.ui.button(
-        label="🎊 Grab Points! 🎊", 
+        label="🎊 LOOT Points! 🎊", 
         style=discord.ButtonStyle.success,
         custom_id="confetti_claim"
     )
@@ -1299,7 +1299,7 @@ class ConfettiTrapView(discord.ui.View):
         self.max_claims = max_claims
  
     @discord.ui.button(
-        label="🎊 Grab Points! 🎊", 
+        label="🎊 LOOT Points! 🎊", 
         style=discord.ButtonStyle.success,
         custom_id="confetti_trap_claim"
     )
