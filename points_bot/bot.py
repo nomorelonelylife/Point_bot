@@ -1136,6 +1136,38 @@ class PointsBot(discord.Client):
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
         print('------')
+    
+        try:
+            print("Registering commands...")
+            logging.info("Registering commands...")
+        
+            # 注册命令
+            await self.register_commands()
+     
+            # 同步命令树
+            await self.tree.sync()
+            print("Commands synced successfully")
+            logging.info("Commands synced successfully")
+    
+        except Exception as e:
+            print(f"Error registering commands: {e}")
+            logging.error(f"Error registering commands: {e}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class ConfettiView(discord.ui.View):
     def __init__(self, db: DatabaseService, ball_id: str, max_claims: int):
