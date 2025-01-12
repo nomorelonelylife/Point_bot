@@ -10,7 +10,7 @@ import aiohttp
 import time
 from discord import app_commands
 from discord.ext import tasks
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, tuple, List, Dict
 from datetime import datetime, timedelta
 from .database import DatabaseService
 from .twitter_service import TwitterService
