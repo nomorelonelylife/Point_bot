@@ -649,7 +649,7 @@ class PointsBot(discord.Client):
                     
                             options.append({
                                 'index': i,
-                                'option_text': text.strip(),
+                                'text': text.strip(),
                                 'points': round(points, 8)
                             })
                         except ValueError:
