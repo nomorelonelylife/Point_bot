@@ -297,7 +297,7 @@ class PointsBot(discord.Client):
                 await interaction.response.send_message(
                     f"🎊 Confetti Ball 🎊\n"
                     f"{ interaction.user.mention} says: {message}\n"
-                    f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!",
+                    f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!"
                     f"⏰ Expires in: {time_str}",
                     view=view
                 )
@@ -312,7 +312,7 @@ class PointsBot(discord.Client):
                     f"An error occurred while creating the confetti ball: {str(e)}\nPlease try again or contact an administrator.",
                     ephemeral=True
                 )
-                
+
         @self.tree.command(name="activeposts", description="View monitored posts")
         @app_commands.checks.has_permissions(administrator=True)
         async def activeposts(interaction: discord.Interaction):
@@ -951,7 +951,7 @@ class PointsBot(discord.Client):
                 await interaction.response.send_message(
                     f"🎊 Confetti Trap 🎊\n"
                     f"{ interaction.user.mention} says: {message}\n"
-                    f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!",
+                    f"Hurry up! {max_claims} lucky Nads can loot points from this confetti ball!"
                     f"⏰ Expires in: {time_str}",
                     view=view
                 )
