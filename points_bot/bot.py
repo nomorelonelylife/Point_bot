@@ -588,7 +588,7 @@ class PointsBot(discord.Client):
                     ephemeral=True
                 )
 
-
+        #test
         @self.tree.command(name="createvote", description="Create a vote (Admin only)")
         @app_commands.checks.has_permissions(administrator=True)
         @app_commands.describe(
