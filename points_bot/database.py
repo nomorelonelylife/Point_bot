@@ -14,6 +14,7 @@ class DatabaseService:
             self.db_path = db_path
             self.pool = ThreadPoolExecutor(max_workers=max_connections)
             self.conn = None
+           # asyncio.create_task(self.async_initialize())
 
         except Exception as e:
             logging.critical(f"Database initialization failed: {str(e)}")
@@ -634,6 +635,7 @@ class DatabaseService:
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
     async def claim_confetti_trap(self, trap_id: str, user_id: str, creator_id: str) -> Tuple[bool, float]:
+
         def db_operation():
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -783,6 +785,135 @@ class DatabaseService:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+    
+    async def get_and_process_expired_traps(self) -> List[Dict]:
+        """Get and process expired traps in a single transaction"""
+        def db_operation():
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
+                
+                # Get all expired traps
+                expired_traps = cursor.execute("""
+                    SELECT * FROM confetti_traps 
+                    WHERE is_active = TRUE 
+                    AND datetime('now') >= datetime(expires_at)
+                    FOR UPDATE
+                """).fetchall()
+                
+                results = []
+                for trap in expired_traps:
+                    try:
+                        # Get claims for this trap
+                        claims = cursor.execute("""
+                            SELECT user_id, points_lost
+                            FROM confetti_trap_claims
+                            WHERE trap_id = ?
+                            ORDER BY claimed_at ASC
+                        """, (trap['trap_id'],)).fetchall()
+                        
+                        # Mark trap as inactive
+                        cursor.execute("""
+                            UPDATE confetti_traps
+                            SET is_active = FALSE
+                            WHERE trap_id = ?
+                        """, (trap['trap_id'],))
+                        
+                        results.append({
+                            'trap_id': trap['trap_id'],
+                            'creator_id': trap['creator_id'],
+                            'channel_id': trap['channel_id'],
+                            'claims': [{'user_id': c[0], 'points_lost': float(c[1])} for c in claims]
+                        })
+                    except Exception as e:
+                        logging.error(f"Error processing trap {trap['trap_id']}: {str(e)}")
+                        continue
+                
+                conn.commit()
+                return results
+                
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                logging.error(f"Error in get_and_process_expired_traps: {str(e)}")
+                return []
+            finally:
+                conn.close()
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
+    async def process_expired_confetti_ball(self, ball_id: str) -> Optional[Dict]:
+        """Process an expired confetti ball, refunding unclaimed points and returning summary"""
+        def db_operation():
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
+            
+                # Get ball details
+                ball = cursor.execute("""
+                    SELECT * FROM confetti_balls 
+                    WHERE ball_id = ? 
+                    AND is_active = TRUE 
+                    AND datetime('now') >= datetime(expires_at)
+                """, (ball_id,)).fetchone()
+            
+                if not ball:
+                    cursor.execute("ROLLBACK")
+                    return None
+                
+                # Calculate unclaimed points
+                claimed_points = cursor.execute("""
+                    SELECT COALESCE(SUM(points_claimed), 0)
+                    FROM confetti_claims
+                    WHERE ball_id = ?
+                """, (ball_id,)).fetchone()[0]
+            
+                unclaimed_points = float(ball['total_points']) - float(claimed_points)
+            
+                if unclaimed_points > 0:
+                    # Refund unclaimed points to creator
+                    cursor.execute("""
+                        UPDATE user_points 
+                        SET points = ROUND(points + ?, 8)
+                        WHERE user_id = ?
+                    """, (unclaimed_points, ball['creator_id']))
+            
+                # Get all claims for this ball
+                claims = cursor.execute("""
+                    SELECT user_id, points_claimed
+                    FROM confetti_claims
+                    WHERE ball_id = ?
+                    ORDER BY claimed_at ASC
+                """, (ball_id,)).fetchall()
+            
+                # Mark ball as inactive
+                cursor.execute("""
+                    UPDATE confetti_balls
+                    SET is_active = FALSE
+                    WHERE ball_id = ?
+                """, (ball_id,))
+            
+                conn.commit()
+            
+                return {
+                    'ball_id': ball_id,
+                    'creator_id': ball['creator_id'],
+                    'total_points': float(ball['total_points']),
+                    'unclaimed_points': unclaimed_points,
+                    'claims': [{'user_id': c[0], 'points_claimed': float(c[1])} for c in claims],
+                    'message': ball['message']
+                }
+            
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                logging.error(f"Error processing expired confetti ball: {str(e)}")
+                return None
+            finally:
+                conn.close()
+
+        return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
 
     async def get_confetti_trap_claims(self, trap_id: str) -> List[Dict]:
         def db_operation():
@@ -797,6 +928,7 @@ class DatabaseService:
                 return [dict(row) for row in rows]
 
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+
     
     async def create_vote(
         self, 

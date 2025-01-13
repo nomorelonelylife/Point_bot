@@ -74,6 +74,7 @@ class PointsBot(discord.Client):
         self.og_role_id = int(og_role_id)
         self.error_logger = ErrorLogger()
         os.makedirs('output', exist_ok=True)
+        self.check_expired_confetti.start()
 
 
     def validate_tweet_url(self, url: str) -> Optional[str]:
@@ -1212,6 +1213,84 @@ class PointsBot(discord.Client):
             raise e
 
         return updates
+    
+        
+    @tasks.loop(minutes=1)
+    async def check_expired_confetti(self):
+        """Check for and process expired confetti balls and traps"""
+        try:
+
+            expired_balls = await self.db.get_expired_confetti_balls()
+            for ball_id in expired_balls:
+                try:
+                    result = await self.db.process_expired_confetti_ball(ball_id)
+                    if result:
+                        channel = self.get_channel(int(result['channel_id']))
+                        if channel:
+                            creator = self.get_user(int(result['creator_id']))
+                            creator_mention = creator.mention if creator else "Unknown User"
+                        
+                            # Create claims summary
+                            claims_text = ""
+                            if result['claims']:
+                                claims_text = "\n".join(
+                                    f"{self.get_user(int(claim['user_id'])).mention}: {claim['points_claimed']:.8f} points"
+                                    for claim in result['claims']
+                                )
+                            else:
+                                claims_text = "No claims were made!"
+                        
+                            # Add refund info if there were unclaimed points
+                            refund_text = ""
+                            if result['unclaimed_points'] > 0:
+                                refund_text = f"\n\n💰 {result['unclaimed_points']:.8f} unclaimed points have been returned to {creator_mention}"
+                        
+                            await channel.send(
+                                f"🎊 Confetti ball from {creator_mention} has expired! Here's the final summary:\n\n{claims_text}{refund_text}"
+                            )
+                except Exception as e:
+                    logging.error(f"Error processing expired ball {ball_id}: {str(e)}")
+                    continue
+
+
+            expired_traps = await self.db.get_and_process_expired_traps()
+            for result in expired_traps:
+                try:
+                    channel = self.get_channel(int(result['channel_id']))
+                    if channel:
+                        creator = self.get_user(int(result['creator_id']))
+                        creator_mention = creator.mention if creator else "Unknown User"
+                            
+                        if result['claims']:
+                            # Create claims summary with mentions
+                            claims_text = "\n".join(
+                                f"{self.get_user(int(claim['user_id'])).mention}: {claim['points_lost']:.8f} points lost"
+                                for claim in result['claims']
+                            )
+                            # Collect all victim mentions
+                            victim_mentions = " ".join(
+                                self.get_user(int(claim['user_id'])).mention 
+                                for claim in result['claims']
+                            )
+                            # Calculate total points lost
+                            total_points_lost = sum(claim['points_lost'] for claim in result['claims'])
+                                
+                            await channel.send(
+                                f"😈 Confetti trap from {creator_mention} has expired! Here's who got trapped:\n\n"
+                                f"{claims_text}\n\n"
+                                f"Total points stolen: {total_points_lost:.8f}\n"
+                                f"Hey {victim_mentions}, you all fell for the trap!"
+                            )
+                        else:
+                            await channel.send(
+                                f"😈 Confetti trap from {creator_mention} has expired without catching anyone! Better luck next time!"
+                            )
+                except Exception as e:
+                    logging.error(f"Error processing expired trap result: {str(e)}")
+                    continue
+    
+        except Exception as e:
+            logging.error(f"Error in check_expired_confetti: {str(e)}")
 
     @tasks.loop(hours=24)
     async def check_tweets(self):
@@ -1260,6 +1339,8 @@ class PointsBot(discord.Client):
                 self.check_tweets.cancel()
             if hasattr(self, 'backup_database'):
                 self.backup_database.cancel()
+            if hasattr(self, 'check_expired_confetti'):
+                self.check_expired_confetti.cancel()
 
             if hasattr(self, 'db'):
                 if hasattr(self.db, 'close'):
