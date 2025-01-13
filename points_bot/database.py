@@ -871,10 +871,15 @@ class DatabaseService:
             try:
                 cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
         
-                # Get ball details with error handling
+                # Get ball details with comprehensive column selection
                 ball = cursor.execute("""
-                    SELECT *, 
-                           ROUND(total_points, 8) as total_points_rounded 
+                    SELECT ball_id, 
+                           creator_id, 
+                           ROUND(total_points, 8) as total_points_rounded, 
+                           message, 
+                           channel_id,
+                           max_claims,
+                           claimed_count
                     FROM confetti_balls 
                     WHERE ball_id = ? 
                     AND is_active = TRUE 
@@ -920,12 +925,13 @@ class DatabaseService:
                 conn.commit()
         
                 return {
-                    'ball_id': ball_id,
+                    'ball_id': ball_dict['ball_id'],
                     'creator_id': ball_dict['creator_id'],
                     'total_points': ball_dict['total_points_rounded'],
                     'unclaimed_points': unclaimed_points,
                     'claims': [{'user_id': c[0], 'points_claimed': float(c[1])} for c in claims],
-                    'message': ball_dict['message']
+                    'message': ball_dict['message'],
+                    'channel_id': ball_dict.get('channel_id', '')
                 }
         
             except Exception as e:
