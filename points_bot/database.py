@@ -501,7 +501,9 @@ class DatabaseService:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("""
-                    SELECT * FROM confetti_balls 
+                    SELECT *, 
+                           ROUND(total_points, 8) as total_points_rounded 
+                    FROM confetti_balls 
                     WHERE ball_id = ? 
                     AND is_active = TRUE 
                     AND datetime('now') < datetime(expires_at)
@@ -862,68 +864,70 @@ class DatabaseService:
         )
     
     async def process_expired_confetti_ball(self, ball_id: str) -> Optional[Dict]:
-        """Process an expired confetti ball, refunding unclaimed points and returning summary"""
         def db_operation():
             conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             try:
                 cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
-            
-                # Get ball details
+        
+                # Get ball details with error handling
                 ball = cursor.execute("""
-                    SELECT * FROM confetti_balls 
+                    SELECT *, 
+                           ROUND(total_points, 8) as total_points_rounded 
+                    FROM confetti_balls 
                     WHERE ball_id = ? 
                     AND is_active = TRUE 
                     AND datetime('now') >= datetime(expires_at)
                 """, (ball_id,)).fetchone()
-            
+        
                 if not ball:
                     cursor.execute("ROLLBACK")
                     return None
-                
+            
+                ball_dict = dict(ball)
+            
                 # Calculate unclaimed points
                 claimed_points = cursor.execute("""
-                    SELECT COALESCE(SUM(points_claimed), 0)
+                    SELECT COALESCE(SUM(points_claimed), 0) as total_claimed
                     FROM confetti_claims
                     WHERE ball_id = ?
-                """, (ball_id,)).fetchone()[0]
-            
-                unclaimed_points = float(ball['total_points']) - float(claimed_points)
-            
+                """, (ball_id,)).fetchone()['total_claimed']
+        
+                unclaimed_points = ball_dict['total_points_rounded'] - float(claimed_points)
+        
                 if unclaimed_points > 0:
-                    # Refund unclaimed points to creator
                     cursor.execute("""
                         UPDATE user_points 
                         SET points = ROUND(points + ?, 8)
                         WHERE user_id = ?
-                    """, (unclaimed_points, ball['creator_id']))
-            
-                # Get all claims for this ball
+                    """, (unclaimed_points, ball_dict['creator_id']))
+        
+                # Get claims and mark ball inactive
                 claims = cursor.execute("""
                     SELECT user_id, points_claimed
                     FROM confetti_claims
                     WHERE ball_id = ?
                     ORDER BY claimed_at ASC
                 """, (ball_id,)).fetchall()
-            
-                # Mark ball as inactive
+        
                 cursor.execute("""
                     UPDATE confetti_balls
                     SET is_active = FALSE
                     WHERE ball_id = ?
                 """, (ball_id,))
-            
+        
                 conn.commit()
-            
+        
                 return {
                     'ball_id': ball_id,
-                    'creator_id': ball['creator_id'],
-                    'total_points': float(ball['total_points']),
+                    'creator_id': ball_dict['creator_id'],
+                    'total_points': ball_dict['total_points_rounded'],
                     'unclaimed_points': unclaimed_points,
                     'claims': [{'user_id': c[0], 'points_claimed': float(c[1])} for c in claims],
-                    'message': ball['message']
+                    'message': ball_dict['message']
                 }
-            
+        
             except Exception as e:
                 cursor.execute("ROLLBACK")
                 logging.error(f"Error processing expired confetti ball: {str(e)}")
