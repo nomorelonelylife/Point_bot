@@ -33,13 +33,9 @@ class ErrorLogger:
         })
 
 def handle_command_exceptions(func):
-    async def wrapper(
-        interaction: discord.Interaction,
-        *args: Union[str, int, float, bool, discord.User, discord.Role],
-        **kwargs: Union[str, int, float, bool, discord.User, discord.Role]
-    ) -> None:
+    async def wrapper(interaction: discord.Interaction):
         try:
-            return await func(interaction, *args, **kwargs)
+            return await func(interaction)
         except (ValueError, TypeError, OverflowError) as e:
             if hasattr(interaction, 'response'):
                 await interaction.response.send_message(
@@ -53,6 +49,7 @@ def handle_command_exceptions(func):
                     ephemeral=True
                 )
             logging.error(f"Command error: {str(e)}")
+    wrapper.__annotations__ = func.__annotations__
     return wrapper
 
 
