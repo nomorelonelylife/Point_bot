@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from .database import DatabaseService
 from .twitter_service import TwitterService
 from collections import deque
-
+from functools import wraps
 
 
 
@@ -33,9 +33,10 @@ class ErrorLogger:
         })
 
 def handle_command_exceptions(func):
-    async def wrapper(interaction: discord.Interaction):
+    @wraps(func)  # This preserves the original function's metadata
+    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
         try:
-            return await func(interaction)
+            return await func(interaction, *args, **kwargs)
         except (ValueError, TypeError, OverflowError) as e:
             if hasattr(interaction, 'response'):
                 await interaction.response.send_message(
@@ -49,9 +50,7 @@ def handle_command_exceptions(func):
                     ephemeral=True
                 )
             logging.error(f"Command error: {str(e)}")
-    wrapper.__annotations__ = func.__annotations__
     return wrapper
-
 
 class PointsBot(discord.Client):
     def __init__(
