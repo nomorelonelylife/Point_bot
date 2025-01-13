@@ -289,9 +289,9 @@ class PointsBot(discord.Client):
                 # Validate expiration
                 expires_at = None
                 if expires_in is not None:
-                    if expires_in < 1 or expires_in > 24 * 60 * 60:  # 1 second to 24 hours
+                    if expires_in < 1 or expires_in > 5 * 60 * 6:  # 1 second to 30 minutes
                         await interaction.response.send_message(
-                            "Expiration must be between 1 second and 24 hours",
+                            "Expiration must be between 1 second and 30 minutes",
                             ephemeral=True
                         )
                         return
@@ -968,9 +968,9 @@ class PointsBot(discord.Client):
                     )
                     return
                 if expires_in is not None:
-                    if not isinstance(expires_in, int) or expires_in < 1 or expires_in > 24 * 60 * 60:
+                    if not isinstance(expires_in, int) or expires_in < 1 or expires_in > 5 * 60 * 6:
                         await interaction.response.send_message(
-                            "Expiration time must be between 1 second and 24 hours",
+                            "Expiration time must be between 1 second and 30 minutes",
                             ephemeral=True
                         )
                         return
@@ -984,9 +984,9 @@ class PointsBot(discord.Client):
                 
                 # Validate expiration similar to the confetti command
                 if expires_in is not None:
-                    if expires_in < 1 or expires_in > 24 * 60 * 60:  
+                    if expires_in < 1 or expires_in > 5 * 60 * 6:  
                         await interaction.response.send_message(
-                            "Expiration must be between 1 second and 24 hours",
+                            "Expiration must be between 1 second and 30 minutes",
                             ephemeral=True
                         )
 

@@ -479,11 +479,11 @@ class DatabaseService:
     ) -> None:
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
-                # If no expiration provided, generate a random expiration between 1s and 24 hours
+                # If no expiration provided, generate a random expiration between 1s and 30 minutes
                 nonlocal expires_at
                 if expires_at is None:
                     expires_at = datetime.now() + timedelta(
-                       seconds=random.uniform(1, 24 * 60 * 60)
+                       seconds=random.uniform(1, 5 * 60 * 6)
                     )
                 
                 conn.execute("""
@@ -603,11 +603,11 @@ class DatabaseService:
     ) -> None:
         def db_operation():
             with sqlite3.connect(self.db_path) as conn:
-                # If no expiration provided, generate a random expiration between 1s and 24 hours
+                # If no expiration provided, generate a random expiration between 1s and 30 minutes
                 nonlocal expires_at
                 if expires_at is None:
                     expires_at = datetime.now() + timedelta(
-                        seconds=random.uniform(1, 24 * 60 * 60)
+                        seconds=random.uniform(1, 5 * 60 * 6)
                     )
             
             conn.execute("""
