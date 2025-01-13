@@ -10,7 +10,7 @@ import aiohttp
 import time
 from discord import app_commands
 from discord.ext import tasks
-from typing import Optional, List, Dict, Callable, Any, TypeVar, Awaitable, Coroutine
+from typing import Optional, List, Dict, Callable, Union, Any, TypeVar, Awaitable, Coroutine
 from datetime import datetime, timedelta
 from .database import DatabaseService
 from .twitter_service import TwitterService
@@ -33,7 +33,11 @@ class ErrorLogger:
         })
 
 def handle_command_exceptions(func):
-    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+    async def wrapper(
+        interaction: discord.Interaction,
+        *args: Union[str, int, float, bool, discord.User, discord.Role],
+        **kwargs: Union[str, int, float, bool, discord.User, discord.Role]
+    ) -> None:
         try:
             return await func(interaction, *args, **kwargs)
         except (ValueError, TypeError, OverflowError) as e:
