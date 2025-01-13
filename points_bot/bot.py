@@ -3,7 +3,6 @@ import re
 import logging
 import random
 import csv
-import math
 import asyncio
 import os
 import shutil
@@ -13,6 +12,7 @@ from discord import app_commands
 from discord.ext import tasks
 from typing import Optional, List, Dict, Callable, Union, Any, TypeVar, Awaitable, Coroutine
 from datetime import datetime, timedelta
+import math
 from .database import DatabaseService
 from .twitter_service import TwitterService
 from collections import deque
