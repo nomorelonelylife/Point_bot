@@ -1219,9 +1219,11 @@ class PointsBot(discord.Client):
     async def check_expired_confetti(self):
         """Check for and process expired confetti balls and traps"""
         try:
-            # Get all expired ball IDs first
-            expired_balls = await self.db.process_expired_confetti_ball()
-            for ball_id in expired_balls:
+            # Get expired ball IDs first
+            expired_ball_ids = await self.db.get_expired_confetti_balls()
+        
+            # Process each expired ball with delay to avoid rate limits
+            for ball_id in expired_ball_ids:
                 try:
                     result = await self.db.process_expired_confetti_ball(ball_id)
                     if result:
@@ -1248,11 +1250,16 @@ class PointsBot(discord.Client):
                             await channel.send(
                                 f"🎊 Confetti ball from {creator_mention} has expired! Here's the final summary:\n\n{claims_text}{refund_text}"
                             )
+                        
+                            # Add delay between messages to avoid rate limits
+                            await asyncio.sleep(2)
+                        
                 except Exception as e:
                     logging.error(f"Error processing expired ball {ball_id}: {str(e)}")
+                    await asyncio.sleep(1)  # Add delay on error
                     continue
 
-            # Process expired traps
+            # Process expired traps with delay
             expired_traps = await self.db.get_and_process_expired_traps()
             for result in expired_traps:
                 try:
@@ -1285,8 +1292,13 @@ class PointsBot(discord.Client):
                             await channel.send(
                                 f"😈 Confetti trap from {creator_mention} has expired without catching anyone! Better luck next time!"
                             )
+                    
+                        # Add delay between messages to avoid rate limits
+                        await asyncio.sleep(2)
+                    
                 except Exception as e:
                     logging.error(f"Error processing expired trap result: {str(e)}")
+                    await asyncio.sleep(1)  # Add delay on error
                     continue
 
         except Exception as e:

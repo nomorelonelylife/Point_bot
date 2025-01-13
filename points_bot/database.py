@@ -842,7 +842,26 @@ class DatabaseService:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self.pool, db_operation)
+    
+    async def get_expired_confetti_balls(self) -> List[str]:
+        """Get IDs of expired confetti balls that are still active"""
+        def db_operation():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                return [
+                    row['ball_id'] for row in conn.execute("""
+                        SELECT ball_id
+                        FROM confetti_balls 
+                        WHERE is_active = TRUE 
+                        AND datetime('now') >= datetime(expires_at)
+                    """).fetchall()
+                ]
 
+        return await asyncio.get_event_loop().run_in_executor(
+            self.pool,
+            db_operation
+        )
+    
     async def process_expired_confetti_ball(self, ball_id: str) -> Optional[Dict]:
         """Process an expired confetti ball, refunding unclaimed points and returning summary"""
         def db_operation():
