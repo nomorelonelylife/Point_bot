@@ -794,15 +794,14 @@ class DatabaseService:
             cursor = conn.cursor()
             try:
                 cursor.execute("BEGIN EXCLUSIVE TRANSACTION")
-                
+            
                 # Get all expired traps
                 expired_traps = cursor.execute("""
                     SELECT * FROM confetti_traps 
                     WHERE is_active = TRUE 
                     AND datetime('now') >= datetime(expires_at)
-                    FOR UPDATE
                 """).fetchall()
-                
+            
                 results = []
                 for trap in expired_traps:
                     try:
@@ -813,14 +812,14 @@ class DatabaseService:
                             WHERE trap_id = ?
                             ORDER BY claimed_at ASC
                         """, (trap['trap_id'],)).fetchall()
-                        
+                    
                         # Mark trap as inactive
                         cursor.execute("""
                             UPDATE confetti_traps
                             SET is_active = FALSE
                             WHERE trap_id = ?
                         """, (trap['trap_id'],))
-                        
+                    
                         results.append({
                             'trap_id': trap['trap_id'],
                             'creator_id': trap['creator_id'],
@@ -830,10 +829,10 @@ class DatabaseService:
                     except Exception as e:
                         logging.error(f"Error processing trap {trap['trap_id']}: {str(e)}")
                         continue
-                
+            
                 conn.commit()
                 return results
-                
+            
             except Exception as e:
                 cursor.execute("ROLLBACK")
                 logging.error(f"Error in get_and_process_expired_traps: {str(e)}")
