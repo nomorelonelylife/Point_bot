@@ -1219,7 +1219,7 @@ class PointsBot(discord.Client):
     async def check_expired_confetti(self):
         """Check for and process expired confetti balls and traps"""
         try:
-
+            # Get all expired ball IDs first
             expired_balls = await self.db.process_expired_confetti_ball()
             for ball_id in expired_balls:
                 try:
@@ -1252,7 +1252,7 @@ class PointsBot(discord.Client):
                     logging.error(f"Error processing expired ball {ball_id}: {str(e)}")
                     continue
 
-
+            # Process expired traps
             expired_traps = await self.db.get_and_process_expired_traps()
             for result in expired_traps:
                 try:
@@ -1260,7 +1260,7 @@ class PointsBot(discord.Client):
                     if channel:
                         creator = self.get_user(int(result['creator_id']))
                         creator_mention = creator.mention if creator else "Unknown User"
-                            
+                        
                         if result['claims']:
                             # Create claims summary with mentions
                             claims_text = "\n".join(
@@ -1274,7 +1274,7 @@ class PointsBot(discord.Client):
                             )
                             # Calculate total points lost
                             total_points_lost = sum(claim['points_lost'] for claim in result['claims'])
-                                
+                            
                             await channel.send(
                                 f"😈 Confetti trap from {creator_mention} has expired! Here's who got trapped:\n\n"
                                 f"{claims_text}\n\n"
@@ -1288,7 +1288,7 @@ class PointsBot(discord.Client):
                 except Exception as e:
                     logging.error(f"Error processing expired trap result: {str(e)}")
                     continue
-    
+
         except Exception as e:
             logging.error(f"Error in check_expired_confetti: {str(e)}")
 
