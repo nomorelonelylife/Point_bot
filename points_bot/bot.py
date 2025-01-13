@@ -13,6 +13,7 @@ from discord.ext import tasks
 from typing import Optional, List, Dict, Callable, Union, Any, TypeVar, Awaitable, Coroutine
 from datetime import datetime, timedelta
 import math
+import unicodedata
 from .database import DatabaseService
 from .twitter_service import TwitterService
 from collections import deque
