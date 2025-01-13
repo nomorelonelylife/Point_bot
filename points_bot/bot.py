@@ -1220,7 +1220,7 @@ class PointsBot(discord.Client):
         """Check for and process expired confetti balls and traps"""
         try:
 
-            expired_balls = await self.db.get_expired_confetti_balls()
+            expired_balls = await self.db.process_expired_confetti_ball()
             for ball_id in expired_balls:
                 try:
                     result = await self.db.process_expired_confetti_ball(ball_id)
